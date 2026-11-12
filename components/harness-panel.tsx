@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Tab = "navegador" | "arquivos" | "skills" | "mcp";
+type Tab = "navegador" | "tela" | "arquivos" | "skills" | "mcp";
 
 interface BrowserState {
   url: string;
@@ -35,6 +35,7 @@ interface McpServer {
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "navegador", label: "navegador" },
+  { id: "tela", label: "tela" },
   { id: "arquivos", label: "arquivos" },
   { id: "skills", label: "skills" },
   { id: "mcp", label: "mcp" },
@@ -71,6 +72,7 @@ export function HarnessPanel() {
       {!collapsed && (
         <div className="hpanel-body">
           {tab === "navegador" && <BrowserTab />}
+          {tab === "tela" && <ScreenTab />}
           {tab === "arquivos" && <FilesTab />}
           {tab === "skills" && <SkillsTab />}
           {tab === "mcp" && <McpTab />}
@@ -137,6 +139,81 @@ function BrowserTab() {
         ) : (
           <span>sem captura ainda</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ScreenTab() {
+  const [state, setState] = useState<{ at: number; error?: string }>({ at: 0 });
+  const [busy, setBusy] = useState("");
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    void fetch("/api/screen")
+      .then((response) => response.json())
+      .then((data: { at: number; error?: string }) => setState(data))
+      .catch(() => undefined);
+  }, []);
+
+  const capture = useCallback(async () => {
+    setBusy("capturar");
+    setStatus("capturando…");
+    try {
+      const data = await post<{ at: number }>("/api/screen", { acao: "capturar" });
+      setState(data);
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "falha ao capturar");
+    } finally {
+      setBusy("");
+    }
+  }, []);
+
+  const control = useCallback(async (comando: string) => {
+    if (comando === "bloquear" && !window.confirm("Bloquear o PC agora?")) return;
+    setBusy(comando);
+    setStatus("");
+    try {
+      await post("/api/screen", { acao: "controle", comando });
+      setStatus(`${comando} ok`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "falha no comando");
+    } finally {
+      setBusy("");
+    }
+  }, []);
+
+  return (
+    <div className="hp-tab">
+      <div className="hp-row">
+        <button type="button" onClick={() => void capture()} disabled={busy !== ""}>
+          {busy === "capturar" ? "capturando…" : "capturar tela"}
+        </button>
+        <span className="hp-meta">
+          {status || (state.at ? new Date(state.at).toLocaleTimeString("pt-BR") : "sem captura")}
+        </span>
+      </div>
+
+      <div className="hp-shot hp-screen">
+        {state.at ? (
+          <a href={`/api/screen?shot=1&t=${state.at}`} target="_blank" rel="noreferrer" title="Abrir em tamanho real">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/api/screen?shot=1&t=${state.at}`} alt="captura da tela do PC" />
+          </a>
+        ) : (
+          <span>sem captura ainda</span>
+        )}
+      </div>
+
+      <div className="hp-controls">
+        <button type="button" onClick={() => void control("volume-down")} disabled={busy !== ""}>vol −</button>
+        <button type="button" onClick={() => void control("mute")} disabled={busy !== ""}>mudo</button>
+        <button type="button" onClick={() => void control("volume-up")} disabled={busy !== ""}>vol +</button>
+        <button type="button" onClick={() => void control("anterior")} disabled={busy !== ""}>⏮</button>
+        <button type="button" onClick={() => void control("play-pause")} disabled={busy !== ""}>⏯</button>
+        <button type="button" onClick={() => void control("proxima")} disabled={busy !== ""}>⏭</button>
+        <button type="button" className="is-danger" onClick={() => void control("bloquear")} disabled={busy !== ""}>bloquear</button>
       </div>
     </div>
   );
@@ -399,6 +476,17 @@ const CSS = `
   .hp-shot { flex: 1; min-height: 120px; border-radius: 10px; border: 1px solid rgba(72,178,214,.18); background: #040a0f; display: grid; place-items: center; overflow: auto; }
   .hp-shot img { max-width: 100%; display: block; }
   .hp-shot span { font-size: 10.5px; color: #5f8b9c; }
+  .hp-screen { align-content: start; justify-items: stretch; }
+  .hp-screen a { display: block; width: 100%; }
+  .hp-screen img { max-width: 100%; width: 100%; display: block; image-rendering: auto; }
+  .hp-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .hp-controls button {
+    cursor: pointer; border-radius: 7px; padding: 6px 4px; font-size: 10px;
+    border: 1px solid rgba(72,178,214,.22); background: rgba(12,36,48,.8); color: #cdeffb;
+  }
+  .hp-controls button:hover { background: rgba(22,70,92,.9); color: #eafaff; }
+  .hp-controls button:disabled { opacity: .45; cursor: default; }
+  .hp-controls button.is-danger { border-color: rgba(255,120,100,.42); color: #ffb6a8; }
   .hp-split { flex-direction: row; gap: 8px; }
   .hp-list { flex: 0 0 130px; margin: 0; padding: 0 4px 0 0; list-style: none; overflow-y: auto; }
   .hp-list li { margin-bottom: 4px; }
