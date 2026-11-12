@@ -58,7 +58,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
   const busyRef = useRef(false);
   const voiceRef = useRef(true);
   const openRef = useRef(false);
-  const hoverRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const speechBufferRef = useRef("");
   const queueRef = useRef<SpeechQueue>({ items: [], draining: false, controller: new AbortController() });
@@ -134,12 +133,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
   useEffect(() => {
     void fetch("/api/stt", { cache: "no-store" }).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    const active = busy || recording || transcribing || speaking || bubbleVisible || input.trim().length > 0;
-    if (active) applyOpen(true);
-    else if (!hoverRef.current) applyOpen(false);
-  }, [applyOpen, bubbleVisible, busy, input, recording, speaking, transcribing]);
 
   useEffect(() => {
     let source: EventSource | null = null;
@@ -340,7 +333,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
       setQuestion(message);
       setReply("");
       setBubbleVisible(true);
-      applyOpen(true);
       setTone("blue");
       stopSpeech();
 
@@ -378,7 +370,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
                 label: String(event.label ?? "Operação"),
                 detail: String(event.detail ?? ""),
               });
-              applyOpen(true);
               setBubbleVisible(true);
             } else {
               setApproval((current) => (current && current.operationId === operationId ? null : current));
@@ -489,7 +480,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
     if (recording || transcribing) return;
     setError("");
     stopSpeech();
-    applyOpen(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
@@ -627,14 +617,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
       className={`hud ${open ? "is-open" : ""}`}
       data-hud="assistant"
       data-state={orbState}
-      onMouseEnter={() => {
-        hoverRef.current = true;
-        applyOpen(true);
-      }}
-      onMouseLeave={() => {
-        hoverRef.current = false;
-        if (!busyRef.current && !recording && !transcribing && !speaking && !bubbleVisible && !input.trim()) applyOpen(false);
-      }}
     >
       <div className="hud-grip" title="Arraste para mover a janela" aria-hidden>
         <i /><i /><i />
@@ -671,7 +653,21 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         </button>
       </div>
 
-      <div className="hud-core">
+      <div
+        className="hud-core"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label={open ? "Fechar controles" : "Abrir controles"}
+        title={open ? "Clique para fechar" : "Clique para falar ou escrever"}
+        onClick={() => applyOpen(!openRef.current)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            applyOpen(!openRef.current);
+          }
+        }}
+      >
         <div className="hud-halo" />
         <Orb state={orbState} tone={tone} emotion={emotion} energyRef={energyRef} size={258} />
         <span className="hud-status">{status}</span>
@@ -733,7 +729,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
               submit();
             }
           }}
-          onFocus={() => applyOpen(true)}
           disabled={recording}
         />
         <button
@@ -783,7 +778,7 @@ const CSS = `
     position: absolute; top: 6px; right: 8px; display: flex; gap: 5px; z-index: 3;
     opacity: 0; transition: opacity .18s ease;
   }
-  .hud:hover .hud-tools, .hud-tools:focus-within { opacity: 1; }
+  .hud.is-open .hud-tools, .hud-tools:focus-within { opacity: 1; }
   .hud-tools button {
     width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer;
     border-radius: 8px; border: 1px solid rgba(72,178,214,.22);
@@ -791,7 +786,8 @@ const CSS = `
   }
   .hud-tools button:hover { background: rgba(18,54,72,.9); color: #d3f1fd; }
   .hud-tools button.is-on { color: #6fe0ff; border-color: rgba(96,216,255,.4); }
-  .hud-core { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .hud-core { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; cursor: pointer; outline: none; border-radius: 50%; -webkit-app-region: no-drag; }
+  .hud-core:focus-visible { box-shadow: 0 0 0 1px rgba(96,216,255,.45); }
   .hud-halo {
     position: absolute; inset: -20px -14px -14px; z-index: 0; pointer-events: none;
     background: radial-gradient(closest-side, rgba(8,30,44,.8) 0%, rgba(4,12,18,.35) 64%, rgba(0,0,0,0) 100%);
