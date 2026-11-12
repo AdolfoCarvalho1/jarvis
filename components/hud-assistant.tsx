@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Orb, type OrbEmotion, type OrbState, type OrbTone } from "./orb";
-import { CloseIcon, FloatIcon, MicIcon, PanelIcon, RecenterIcon, SendIcon, SpeakerIcon, SpeakerOffIcon } from "./icons";
+import { CloseIcon, FloatIcon, MicIcon, MoveIcon, PanelIcon, RecenterIcon, SendIcon, SpeakerIcon, SpeakerOffIcon } from "./icons";
 import { takeSpeech } from "@/lib/speech-text";
 import { sentimentOf } from "@/lib/sentiment";
 
@@ -648,6 +648,9 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         <button type="button" onClick={() => window.jarvisHud?.recenter()} title="Recentralizar" aria-label="Recentralizar">
           <RecenterIcon size={13} />
         </button>
+        <button type="button" className="hud-drag" title="Mover janela" aria-label="Mover janela">
+          <MoveIcon size={13} />
+        </button>
         <button type="button" onClick={closeWindow} title="Fechar" aria-label="Fechar">
           <CloseIcon size={13} />
         </button>
@@ -786,6 +789,8 @@ const CSS = `
   }
   .hud-tools button:hover { background: rgba(18,54,72,.9); color: #d3f1fd; }
   .hud-tools button.is-on { color: #6fe0ff; border-color: rgba(96,216,255,.4); }
+  .hud-tools button.hud-drag { -webkit-app-region: drag; cursor: grab; }
+  .hud-tools button.hud-drag:active { cursor: grabbing; }
   .hud-core { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; cursor: pointer; outline: none; border-radius: 50%; -webkit-app-region: no-drag; }
   .hud-core:focus-visible { box-shadow: 0 0 0 1px rgba(96,216,255,.45); }
   .hud-halo {
