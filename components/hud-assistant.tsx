@@ -618,10 +618,6 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
       data-hud="assistant"
       data-state={orbState}
     >
-      <div className="hud-grip" title="Arraste para mover a janela">
-        <i /><i /><i />
-      </div>
-
       <div className="hud-tools">
         <button
           type="button"
@@ -764,19 +760,9 @@ const CSS = `
   html, body { background: transparent !important; overflow: hidden !important; margin: 0 !important; }
   .hud {
     position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: flex-start; padding: 24px 10px 10px; gap: 6px; overflow: hidden;
+    justify-content: flex-start; padding: 10px 10px 10px; gap: 6px; overflow: hidden;
     font-family: var(--font-geist-sans), system-ui, sans-serif; background: transparent;
   }
-  .hud-grip {
-    position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 40;
-    display: flex; gap: 3px; align-items: center; justify-content: center;
-    width: 120px; height: 22px; border-radius: 0 0 11px 11px;
-    background: rgba(6,20,29,.55); border: 1px solid rgba(72,178,214,.22); border-top: 0;
-    -webkit-app-region: drag; cursor: grab; opacity: .6; transition: opacity .15s ease;
-  }
-  .hud-grip:hover { opacity: .95; }
-  .hud-grip:active { cursor: grabbing; }
-  .hud-grip i { width: 3px; height: 3px; border-radius: 50%; background: #8ad6ec; }
   .hud-tools {
     position: absolute; top: 6px; right: 8px; display: flex; gap: 5px; z-index: 3;
     opacity: 0; transition: opacity .18s ease;
