@@ -9,6 +9,7 @@ import { buildSystemPrompt } from "@/lib/prompt";
 import { getActiveModel, getContextState, getMainConversation } from "@/lib/session";
 import { TOOL_LABELS, executeTool, toolRequiresApproval, tools } from "@/lib/tools";
 import { mcpToolDefinitions } from "@/lib/mcp";
+import { META_TOOLS, coreToolDefinitions, findToolDefinition, searchTools } from "@/lib/tool-catalog";
 import { takeTurn, TurnBusy } from "@/lib/turn-lock";
 import type { StreamEvent, ToolEvent } from "@/lib/types";
 
@@ -22,7 +23,7 @@ function toolResult(result: string): Pick<ToolEvent, "status" | "detail" | "prop
   try {
     const data = JSON.parse(result);
     const status = data.error || data.ok === false ? "error" : "done";
-    const count = data.results?.length ?? data.resultados?.length ?? data.arquivos?.length ?? data.lembretes?.length;
+    const count = data.results?.length ?? data.resultados?.length ?? data.arquivos?.length ?? data.lembretes?.length ?? data.ferramentas?.length;
     const info = data.memoria?.content ?? data.lembrete?.title ??
       (data.descricao ? "Tela capturada e analisada." : undefined) ??
       (data.arquivo ? `Arquivo: ${data.arquivo}` : undefined) ??
@@ -105,7 +106,8 @@ export async function POST(request: Request) {
             return [{ role: item.role, content: item.content }];
           }),
         ];
-        const chatTools = [...tools, ...(await mcpToolDefinitions())];
+        const allTools = [...tools, ...(await mcpToolDefinitions())];
+        const chatTools = [...coreToolDefinitions(allTools), ...META_TOOLS];
         send({ type: "meta", conversationId, title: conversation.title, model });
         if (payload.ack === true) ack = setTimeout(() => {
           if (!visible && !activeTool && !signal.aborted) send({ type: "ack", text: "Já vejo isso, senhor." });
@@ -146,42 +148,74 @@ export async function POST(request: Request) {
             signal.throwIfAborted();
             const { name } = call.function;
             const id = randomUUID();
-            const label = TOOL_LABELS[name] ?? name;
-            let result: string;
-            let args: Record<string, unknown> | null;
+            let targetName = name;
+            let targetArgs: Record<string, unknown> | null;
             try {
-              args = JSON.parse(call.function.arguments || "{}");
-              if (!args || typeof args !== "object" || Array.isArray(args)) args = null;
+              targetArgs = JSON.parse(call.function.arguments || "{}");
+              if (!targetArgs || typeof targetArgs !== "object" || Array.isArray(targetArgs)) targetArgs = null;
             } catch {
-              args = null;
+              targetArgs = null;
             }
-            if (!args) {
+            let result: string;
+            let eventName = name;
+            let label = TOOL_LABELS[name] ?? name;
+            if (!targetArgs) {
               result = JSON.stringify({ error: "Parâmetros da operação inválidos." });
+            } else if (name === "listar_ferramentas") {
+              const busca = typeof targetArgs.busca === "string" ? targetArgs.busca : "";
+              const limite = Number(targetArgs.limite ?? 6);
+              result = JSON.stringify(searchTools(allTools, busca, Number.isFinite(limite) ? limite : 6));
+              label = TOOL_LABELS.listar_ferramentas;
             } else {
-              const needsApproval = toolRequiresApproval(name, args);
-              let approved = false;
-              const details = JSON.stringify(args, null, 2);
-              if (needsApproval && details.length <= 12_000) {
-                const approval = askApproval(signal);
-                activeTool = { id, name, label, status: "approval", detail: details, approvalId: approval.id };
-                send({ type: "tool", ...activeTool });
-                approved = await approval.decision;
+              if (name === "usar_ferramenta") {
+                targetName = String(targetArgs.nome ?? "").trim();
+                const rawArgs = targetArgs.argumentos;
+                let parsedArgs: Record<string, unknown> = {};
+                if (typeof rawArgs === "string") {
+                  try {
+                    const parsed = JSON.parse(rawArgs);
+                    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) parsedArgs = parsed;
+                  } catch {
+                    parsedArgs = {};
+                  }
+                } else if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
+                  parsedArgs = rawArgs as Record<string, unknown>;
+                }
+                targetArgs = parsedArgs;
+                eventName = targetName || "usar_ferramenta";
+                label = TOOL_LABELS[targetName] ??
+                  (targetName.startsWith("mcp__navegador__") ? "Navegando"
+                    : targetName.startsWith("mcp__") ? "Usando MCP"
+                      : targetName ? `Usando ${targetName}` : "Usando ferramenta");
               }
-              signal.throwIfAborted();
-              if (needsApproval && !approved) {
-                result = JSON.stringify({ error: details.length > 12_000 ? "Parâmetros extensos demais para revisão." : "Ação recusada ou confirmação expirada." });
+              if (name === "usar_ferramenta" && !findToolDefinition(allTools, targetName)) {
+                result = JSON.stringify({ error: `ferramenta "${targetName}" não existe; use listar_ferramentas antes` });
               } else {
-                activeTool = { id, name, label, status: "running" };
-                send({ type: "tool", ...activeTool });
-                result = await executeTool(name, args, signal, approved);
-                if (["executar_projeto", "acompanhar_arquivo"].includes(name) ||
-                  (name === "gerenciar_rotina" && args.acao === "executar")) {
-                  const queued = JSON.parse(result);
-                  if (typeof queued.id === "string") queuedTasks.push(queued.id);
+                const needsApproval = toolRequiresApproval(targetName, targetArgs);
+                let approved = false;
+                const details = JSON.stringify(targetArgs, null, 2);
+                if (needsApproval && details.length <= 12_000) {
+                  const approval = askApproval(signal);
+                  activeTool = { id, name: eventName, label, status: "approval", detail: details, approvalId: approval.id };
+                  send({ type: "tool", ...activeTool });
+                  approved = await approval.decision;
+                }
+                signal.throwIfAborted();
+                if (needsApproval && !approved) {
+                  result = JSON.stringify({ error: details.length > 12_000 ? "Parâmetros extensos demais para revisão." : "Ação recusada ou confirmação expirada." });
+                } else {
+                  activeTool = { id, name: eventName, label, status: "running" };
+                  send({ type: "tool", ...activeTool });
+                  result = await executeTool(targetName, targetArgs, signal, approved);
+                  if (["executar_projeto", "acompanhar_arquivo"].includes(targetName) ||
+                    (targetName === "gerenciar_rotina" && targetArgs.acao === "executar")) {
+                    const queued = JSON.parse(result);
+                    if (typeof queued.id === "string") queuedTasks.push(queued.id);
+                  }
                 }
               }
             }
-            const event: ToolEvent = { id, name, label, ...toolResult(result) };
+            const event: ToolEvent = { id, name: eventName, label, ...toolResult(result) };
             activeTool = undefined;
             await storage.addMessage(conversationId, "tool", JSON.stringify(event));
             send({ type: "tool", ...event });
