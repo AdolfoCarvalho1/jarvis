@@ -8,6 +8,7 @@ import { storage } from "@/lib/db";
 import { buildSystemPrompt } from "@/lib/prompt";
 import { getActiveModel, getContextState, getMainConversation } from "@/lib/session";
 import { TOOL_LABELS, executeTool, toolRequiresApproval, tools } from "@/lib/tools";
+import { mcpToolDefinitions } from "@/lib/mcp";
 import { takeTurn, TurnBusy } from "@/lib/turn-lock";
 import type { StreamEvent, ToolEvent } from "@/lib/types";
 
@@ -104,6 +105,7 @@ export async function POST(request: Request) {
             return [{ role: item.role, content: item.content }];
           }),
         ];
+        const chatTools = [...tools, ...(await mcpToolDefinitions())];
         send({ type: "meta", conversationId, title: conversation.title, model });
         if (payload.ack === true) ack = setTimeout(() => {
           if (!visible && !activeTool && !signal.aborted) send({ type: "ack", text: "Já vejo isso, senhor." });
@@ -119,7 +121,7 @@ export async function POST(request: Request) {
           const roundStart = performance.now();
           let lastText = 0;
           const outcome = await streamCompletion({
-            messages: turns, tools, model, signal,
+            messages: turns, tools: chatTools, model, signal,
             onText: (chunk) => {
               lastText = performance.now();
               if (!visible) send({ type: "timing", firstTextMs: Math.round(lastText - receivedAt) });

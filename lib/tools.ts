@@ -7,6 +7,7 @@ import { describeImage } from "./vision";
 import { executeTaskTool, taskTools } from "./automation/chat-tools";
 import { automationEnabled, syncReminderTask } from "./automation/tasks";
 import { cancelTask } from "./automation/store";
+import { executeMcpTool, isMcpTool, mcpRequiresApproval } from "./mcp";
 
 export interface ToolDefinition {
   type: "function";
@@ -427,6 +428,7 @@ export const tools: ToolDefinition[] = [
 ];
 
 export function toolRequiresApproval(name: string, args: Record<string, unknown>) {
+  if (isMcpTool(name)) return mcpRequiresApproval(name);
   return ["ver_tela", "controlar_pc", "executar_projeto", "acompanhar_arquivo", "cancelar_tarefa",
     "lembrar", "criar_lembrete", "concluir_lembrete", "salvar_nota_obsidian"].includes(name) ||
     (name === "gerenciar_rotina" && args.acao !== "listar");
@@ -434,6 +436,10 @@ export function toolRequiresApproval(name: string, args: Record<string, unknown>
 
 export async function executeTool(name: string, args: Record<string, unknown>, signal: AbortSignal, approved = false): Promise<string> {
   signal.throwIfAborted();
+  if (isMcpTool(name)) {
+    if (toolRequiresApproval(name, args) && !approved) return JSON.stringify({ error: "Ação não autorizada." });
+    return executeMcpTool(name, args, signal);
+  }
   if (toolRequiresApproval(name, args) && !approved) return JSON.stringify({ error: "Ação não autorizada." });
   try {
     switch (name) {
