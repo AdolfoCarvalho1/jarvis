@@ -3,6 +3,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 
 export type OrbState = "idle" | "thinking" | "listening" | "speaking";
+// Keep the existing public tone contract; the normal hologram is now amber.
 export type OrbTone = "blue" | "red";
 export type OrbEmotion = "calm" | "curious" | "focused" | "excited" | "angry" | "alert";
 
@@ -15,122 +16,136 @@ interface OrbProps {
   className?: string;
 }
 
-type Color = [number, number, number];
-
-/**
- * Cada emoção é um perfil de movimento e cor. Os valores são alvo de uma
- * transição suave — trocar de emoção não corta a animação, ela migra.
- */
-interface EmotionProfile {
-  primary: Color;
-  secondary: Color;
-  accent: Color;
-  spin: number;
-  energy: number;
-  pulse: number;
-  jitter: number;
-  spark: number;
-  aperture: number;
-  tilt: number;
-  glow: number;
-  sweep: number;
-  dim: number;
-  scale: number;
-}
-
-const EMOTIONS: Record<OrbEmotion, EmotionProfile> = {
-  // calmo: grande, apagado, respiração lenta
-  calm: {
-    primary: [46, 215, 255], secondary: [194, 251, 255], accent: [255, 180, 77],
-    spin: 1.06, energy: 0.05, pulse: 0.55, jitter: 0, spark: 0.5, aperture: 1,
-    tilt: 0, glow: 1.22, sweep: 0.86, dim: 0.55, scale: 1.07,
-  },
-  // curioso: inclina o disco e vira turquesa, como quem olha de lado
-  curious: {
-    primary: [96, 255, 220], secondary: [214, 255, 248], accent: [255, 198, 112],
-    spin: 1.45, energy: 0.14, pulse: 0.8, jitter: 0.18, spark: 0.62, aperture: 1.12,
-    tilt: 0.38, glow: 1.02, sweep: 1.2, dim: 1, scale: 1.01,
-  },
-  // concentrado: menor, azul profundo, varredura estreita e rápida
-  focused: {
-    primary: [62, 150, 255], secondary: [150, 206, 255], accent: [255, 150, 60],
-    spin: 2.3, energy: 0.2, pulse: 0.22, jitter: 0, spark: 0.55, aperture: 0.84,
-    tilt: 0.08, glow: 0.9, sweep: 2.4, dim: 1, scale: 0.86,
-  },
-  // animado: maior, ciano claro, pulsos largos e muita poeira
-  excited: {
-    primary: [120, 250, 255], secondary: [240, 255, 255], accent: [255, 214, 96],
-    spin: 2.9, energy: 0.45, pulse: 1.9, jitter: 0.3, spark: 1, aperture: 1.24,
-    tilt: 0.2, glow: 1.08, sweep: 1.3, dim: 1, scale: 1.08,
-  },
-  // irritado: vermelho, tremor curto, pulsos agressivos
-  angry: {
-    primary: [255, 92, 70], secondary: [255, 194, 166], accent: [255, 132, 58],
-    spin: 3.5, energy: 0.55, pulse: 2.3, jitter: 1, spark: 1.2, aperture: 0.82,
-    tilt: 0.06, glow: 0.9, sweep: 1.6, dim: 1, scale: 0.96,
-  },
-  // alerta: âmbar elétrico, batida forte, piscada
-  alert: {
-    primary: [255, 152, 62], secondary: [255, 232, 184], accent: [255, 86, 58],
-    spin: 3, energy: 0.5, pulse: 2.8, jitter: 0.85, spark: 1.1, aperture: 1.2,
-    tilt: 0.12, glow: 0.94, sweep: 1.8, dim: 1, scale: 0.98,
-  },
-};
-type Point = { x: number; y: number };
-type Ring = { radius: number; depth: number; speed: number; phase: number; ticks: number };
+type Vec = { x: number; y: number; z: number };
+type Trace = { points: Vec[]; weight: number; seed: number; terminal: boolean; fill?: number; bright?: boolean };
 const TAU = Math.PI * 2;
-const CYAN: Color = [46, 215, 255];
-const ICE: Color = [194, 251, 255];
-const AMBER: Color = [255, 180, 77];
-const CORAL: Color = [255, 88, 72];
-
-// Depth is interleaved across radii to keep the assembly open and flat at its center.
-const RINGS: Ring[] = [
-  { radius: 1, depth: -0.27, speed: 0.018, phase: 0.1, ticks: 156 },
-  { radius: 0.925, depth: 0.22, speed: -0.025, phase: 0.6, ticks: 128 },
-  { radius: 0.815, depth: -0.48, speed: 0.035, phase: 1.3, ticks: 120 },
-  { radius: 0.715, depth: 0.33, speed: -0.04, phase: 0.35, ticks: 100 },
-  { radius: 0.605, depth: -0.16, speed: 0.045, phase: 2.1, ticks: 100 },
-  { radius: 0.485, depth: 0.06, speed: -0.055, phase: 0.12, ticks: 84 },
-  { radius: 0.355, depth: -0.25, speed: 0.07, phase: 2.7, ticks: 52 },
-];
-const PAINT_ORDER = RINGS.map((ring, index) => ({ ring, index })).sort((a, b) => a.ring.depth - b.ring.depth);
-const APERTURE: ReadonlyArray<readonly [number, number]> = [
-  [-0.17, -0.09], [-0.08, -0.17], [0.11, -0.17], [0.19, -0.08],
-  [0.19, 0.08], [0.08, 0.16], [-0.11, 0.16], [-0.17, 0.09],
-];
-
-function color(rgb: Color, alpha: number) {
-  return `rgba(${rgb[0] | 0},${rgb[1] | 0},${rgb[2] | 0},${Math.max(0, Math.min(1, alpha)).toFixed(3)})`;
+const MOODS: Record<OrbEmotion, { speed: number; heat: number; tilt: number }> = {
+  calm: { speed: 0.15, heat: 0, tilt: 0 },
+  curious: { speed: 0.22, heat: 0.12, tilt: 0.2 },
+  focused: { speed: 0.32, heat: 0.15, tilt: -0.08 },
+  excited: { speed: 0.36, heat: 0.3, tilt: 0.08 },
+  angry: { speed: 0.4, heat: 0.35, tilt: -0.05 },
+  alert: { speed: 0.3, heat: 0.3, tilt: 0.12 },
+};
+const random = (n: number) => {
+  const v = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return v - Math.floor(v);
+};
+/** Authored banks of curved circuitry, with dense illuminated strata and dark gaps. */
+function makeTraces(small: boolean): Trace[] {
+  const traces: Trace[] = [];
+  const ringPoint = (r: number, a: number, z: number): Vec => ({
+    x: Math.cos(a) * r + z * 0.12,
+    y: Math.sin(a) * r * 1.04,
+    z: z + Math.cos(a) * r * 0.28,
+  });
+  const arc = (r: number, start: number, length: number, z: number, weight: number, seed: number, bright = false) => {
+    const points: Vec[] = [];
+    const steps = Math.max(3, Math.ceil(length * 32));
+    for (let k = 0; k <= steps; k++) points.push(ringPoint(r, start + length * k / steps, z));
+    if (seed % 3 === 0) {
+      const tilt = seed % 2 ? 1.05 : -0.8;
+      for (const p of points) {
+        const y = p.y, z0 = p.z - z;
+        p.y = y * Math.cos(tilt) - z0 * Math.sin(tilt);
+        p.z = z + y * Math.sin(tilt) + z0 * Math.cos(tilt);
+        p.x += Math.sin(seed) * 0.06;
+      }
+    }
+    traces.push({ points, weight, seed, terminal: false, bright });
+  };
+  // Eccentric broken belts: the brightest edges live on the left, never a globe grid.
+  for (let i = 0; i < (small ? 35 : 75); i++) {
+    const r = 0.33 + random(i + 62) * 0.67;
+    const a = i % 3 === 0 ? 2.1 + random(i) * 1.6 : random(i + 40) * TAU;
+    if (r > 0.87 && a > 4.5 && a < 6.1) continue;
+    arc(r, a, 0.22 + random(i + 4) * 1.7, (random(i + 84) - 0.5) * 0.9, i % 9 === 0 ? 2.8 : 0.6 + random(i) * 0.9, i, i % 8 === 0);
+  }
+  // A broken orange C carries the left-hand energy mass.
+  for (let i = 0; i < 5; i++) {
+    arc(0.44 + i * 0.008, 2.25, 1.62, 0.18, i === 2 ? 3 : 1, 2801 + i * 3, i === 2);
+    arc(0.44 + i * 0.008, 1.3, 0.58, 0.18, 0.8, 2821 + i * 3);
+  }
+  // Curved transparent circuit panels. Interrupted rectangular borders have physical depth.
+  for (let i = 0; i < (small ? 18 : 43); i++) {
+    const a = random(i + 191) * TAU;
+    const r = 0.57 + random(i + 281) * 0.4;
+    const width = 0.08 + random(i + 371) * 0.3;
+    const depth = 0.12 + random(i + 471) * 0.34;
+    const z = (random(i + 571) - 0.5) * 0.75;
+    const points: Vec[] = [];
+    for (let k = 0; k <= 9; k++) points.push(ringPoint(r, a + width * k / 9, z));
+    for (let k = 9; k >= 0; k--) points.push(ringPoint(r, a + width * k / 9, z - depth));
+    points.push(points[0]);
+    traces.push({ points, weight: 0.65, seed: i + 120, terminal: i % 4 === 0, fill: i % 3 === 0 ? 0.045 : 0.014 });
+    for (let k = 0; k < 5; k++) arc(r - 0.012 * k, a, width * (0.4 + random(i + k) * 0.6), z - depth * k / 5, 0.6, i * 5 + k + 200);
+  }
+  // Granular energy is concentrated in belts, not uniformly scattered on a shell.
+  for (let i = 0; i < (small ? 350 : 1450); i++) {
+    const bank = i % 5;
+    const r = [0.88, 0.72, 0.51, 0.95, 0.36][bank] + (random(i + 31) - 0.5) * (bank % 2 ? 0.15 : 0.22);
+    const a = random(i + 125) * TAU;
+    if (bank === 2 && a > 0.2 && a < 1.3) continue;
+    if (bank === 3 && a > 3.6 && a < 5.2) continue;
+    const z = (random(i + 255) - 0.5) * (bank === 3 ? 1.1 : 0.5);
+    const start = ringPoint(r, a, z);
+    const end = ringPoint(r + (random(i + 478) - 0.5) * 0.035, a + 0.004 + random(i + 326) * 0.035, z);
+    traces.push({ points: [start, end], weight: 0.35 + random(i + 90) * 1.7, seed: i + 500, terminal: i % 29 === 0, bright: i % 7 === 0 });
+  }
+  // Recognizable floating instrument plates, each facing a different plane.
+  for (let i = 0; i < 7; i++) {
+    const x = [0.16, 0.38, 0.46, 0.04, -0.18, -0.47, -0.62][i];
+    const y = [-0.87, -0.65, -0.43, 0.39, 0.58, -0.35, 0.13][i];
+    const w = 0.12 + random(i + 67) * 0.12;
+    const h = 0.14 + random(i + 88) * 0.24;
+    const z = 0.22 + random(i + 99) * 0.25;
+    const plate = (u: number, v: number): Vec => ({ x: x + u - v * 0.1, y: y + v, z: z + u * 0.7 + Math.sin(v * 4) * 0.05 });
+    traces.push({ points: [plate(0, h * 0.18), plate(0, 0), plate(w * 0.88, 0), plate(w, h * 0.14), plate(w * 0.94, h), plate(w * 0.25, h)], weight: 0.6, seed: i + 2500, terminal: false, fill: 0.035 });
+    for (let j = 1; j < 11; j++) traces.push({ points: [plate(0.01, h * j / 11), plate(w * (0.45 + random(j + i) * 0.5), h * j / 11)], weight: j % 3 ? 0.45 : 1, seed: i * 11 + j + 2600, terminal: false });
+  }
+  // Unequal horizontal data rails erupt from the emitter through the inner volume.
+  for (let i = 0; i < (small ? 28 : 85); i++) {
+    const y = (random(i + 730) - 0.5) * 0.52 - 0.04;
+    const x = -0.26 + random(i + 820) * 0.35;
+    const z = (random(i + 910) - 0.5) * 0.55;
+    const length = 0.16 + random(i + 1000) * 0.7;
+    traces.push({ points: [{ x, y, z }, { x: x + length, y: y - 0.012, z }, { x: x + length + 0.03, y: y - 0.04, z }], weight: i % 12 === 0 ? 1.5 : 0.3 + random(i + 34) * 0.5, seed: i + 2100, terminal: i % 15 === 0, bright: i % 9 === 0 });
+  }
+  // An unfinished lower-left fan breaks the circular silhouette.
+  for (let i = 0; i < 26; i++) {
+    const a = 1.87 + i / 26 * 0.6;
+    const r = 0.86 + random(i + 90) * 0.1;
+    traces.push({ points: [ringPoint(r, a, 0), ringPoint(1.08 + random(i + 32) * 0.1, a, -0.13), ringPoint(1.1, a + 0.055, -0.13)], weight: i % 5 === 0 ? 3 : 1, seed: i + 2300, terminal: i % 3 === 0, bright: i % 5 === 0 });
+  }
+  return traces;
 }
 
-/** Live perspective-projected holographic core; no bitmap or 3D dependency. */
+/** Transparent, perspective-projected circuit sphere shared by chat, PiP and HUD. */
 export function Orb({ state = "idle", tone = "blue", emotion, energyRef, size = 240, className = "" }: OrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef(state);
   const toneRef = useRef(tone);
-  const emotionRef = useRef<OrbEmotion>(emotion ?? "calm");
+  const resolvedEmotion = emotion ?? (state === "thinking" ? "focused" : state === "listening" ? "curious" : state === "speaking" ? "excited" : "calm");
+  const emotionRef = useRef(resolvedEmotion);
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { toneRef.current = tone; }, [tone]);
-  useEffect(() => { emotionRef.current = emotion ?? "calm"; }, [emotion]);
+  useEffect(() => { emotionRef.current = resolvedEmotion; }, [resolvedEmotion]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d", { alpha: true });
     if (!canvas || !ctx) return;
-
-    // Document PiP has its own visibility and animation clock.
     let frameWindow = canvas.ownerDocument.defaultView ?? window;
-    const motion = frameWindow.matchMedia("(prefers-reduced-motion: reduce)");
+    const inputWindow = frameWindow;
+    const motion = inputWindow.matchMedia("(prefers-reduced-motion: reduce)");
     let reduced = motion.matches;
     const onMotion = () => { reduced = motion.matches; };
     motion.addEventListener("change", onMotion);
-    const inputWindow = frameWindow;
-    let pointerX = 0, pointerY = 0, targetX = 0, targetY = 0;
+    let targetX = 0, targetY = 0, pointerX = 0, pointerY = 0;
     const onPointer = (event: PointerEvent) => {
       if (event.pointerType === "touch" || reduced) return;
       const bounds = canvas.getBoundingClientRect();
-      const reach = Math.max(bounds.width * 0.63, 1);
+      const reach = Math.max(bounds.width, 1);
       targetX = Math.max(-1, Math.min(1, (event.clientX - bounds.left - bounds.width / 2) / reach));
       targetY = Math.max(-1, Math.min(1, (event.clientY - bounds.top - bounds.height / 2) / reach));
     };
@@ -139,355 +154,142 @@ export function Orb({ state = "idle", tone = "blue", emotion, energyRef, size = 
     inputWindow.addEventListener("pointermove", onPointer, { passive: true });
     inputWindow.addEventListener("pointerout", onPointerOut, { passive: true });
     inputWindow.addEventListener("blur", resetPointer);
-    const dpr = Math.min(frameWindow.devicePixelRatio || 1, 2);
+    const dpr = Math.min(inputWindow.devicePixelRatio || 1, 2);
     canvas.width = Math.round(size * dpr);
     canvas.height = Math.round(size * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const small = size < 150;
+    const traces = makeTraces(small);
     const center = size / 2;
-    const baseRadius = size * 0.41;
-    const unit = size / 520;
+    const unit = size / 460;
     let visible = true;
     const observer = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; });
     observer.observe(canvas);
-    let frame = 0, last = 0, rotation = 0, energy = 0, clock = 0;
-    const cyan: Color = [...CYAN], ice: Color = [...ICE], amber: Color = [...AMBER];
-    const feel = { spin: 1, energy: 0, pulse: 0.35, jitter: 0, spark: 0.3, aperture: 1, tilt: 0, glow: 1, sweep: 1, dim: 1, scale: 1 };
+    let frame = 0, last = 0, clock = 0, rotation = 0, energy = 0, heat = 0, tilt = 0, red = 0;
 
+    let lastStaticKey = "";
     const draw = (now: number) => {
       frameWindow = canvas.ownerDocument.defaultView ?? frameWindow;
       frame = frameWindow.requestAnimationFrame(draw);
       if (now - last < (reduced ? 100 : 1000 / 30)) return;
-      const elapsed = last ? Math.min((now - last) / 1000, 0.08) : 1 / 30;
+      const dt = last ? Math.min((now - last) / 1000, 0.08) : 1 / 30;
       last = now;
       if (!visible || canvas.ownerDocument.hidden) return;
-      const currentState = stateRef.current;
-      const profile = toneRef.current === "red" ? EMOTIONS.angry : EMOTIONS[emotionRef.current] ?? EMOTIONS.calm;
-      const idle = currentState === "idle" ? 1 : 0;
-      const mood = 1 - Math.exp(-elapsed * 2.6);
-      clock += elapsed;
-      feel.spin += (profile.spin - feel.spin) * mood;
-      feel.energy += (profile.energy - feel.energy) * mood;
-      feel.pulse += (profile.pulse - feel.pulse) * mood;
-      feel.jitter += (profile.jitter - feel.jitter) * mood;
-      feel.spark += (profile.spark - feel.spark) * mood;
-      feel.aperture += (profile.aperture - feel.aperture) * mood;
-      feel.tilt += (profile.tilt - feel.tilt) * mood;
-      feel.glow += (profile.glow - feel.glow) * mood;
-      feel.sweep += (profile.sweep - feel.sweep) * mood;
-      feel.dim += (profile.dim - feel.dim) * mood;
-      feel.scale += (profile.scale - feel.scale) * mood;
-      for (let i = 0; i < 3; i++) {
-        cyan[i] += (profile.primary[i] - cyan[i]) * mood;
-        ice[i] += (profile.secondary[i] - ice[i]) * mood;
-        amber[i] += (profile.accent[i] - amber[i]) * mood;
-      }
-      const activity = currentState === "idle" ? 0 : currentState === "thinking" ? 0.13 : 0.2;
-      const audio = energyRef?.current ?? 0;
-      const heartbeat = idle ? Math.pow(Math.max(0, Math.sin(clock * 0.7)), 12) * 0.06 : 0;
-      const idleLife = idle ? 0.03 + 0.02 * (0.5 + 0.5 * Math.sin(clock * 0.83)) + heartbeat : 0;
-      const wanted = Math.max(
-        Number.isFinite(audio) ? Math.min(1, Math.max(0, audio)) : 0,
-        activity,
-        feel.energy * 0.55,
-        idleLife,
-      );
-      energy += (wanted - energy) * (1 - Math.exp(-elapsed * (wanted > energy ? 15 : 5)));
-      if (!reduced) {
-        rotation += elapsed * (currentState === "thinking" ? 2.4 : 1 + energy * 0.65 + idle * 0.1) * feel.spin;
-      }
-      const follow = 1 - Math.exp(-elapsed * 6);
+      const current = stateRef.current;
+      const staticKey = `${current}:${emotionRef.current}:${toneRef.current}`;
+      if (reduced && staticKey === lastStaticKey) return;
+      lastStaticKey = reduced ? staticKey : "";
+      const mood = MOODS[emotionRef.current];
+      const follow = 1 - Math.exp(-dt * 5);
+      const audio = reduced ? 0 : energyRef?.current ?? 0;
+      const activity = current === "speaking" ? 0.22 : current === "listening" ? 0.1 : current === "thinking" ? 0.16 : 0;
+      const wanted = Math.max(Number.isFinite(audio) ? Math.min(1, Math.max(0, audio)) : 0, activity);
+      const wantedRed = toneRef.current === "red" || emotionRef.current === "angry" ? 1 : 0;
+      energy = reduced ? wanted : energy + (wanted - energy) * (1 - Math.exp(-dt * (wanted > energy ? 15 : 5)));
+      heat = reduced ? mood.heat : heat + (mood.heat - heat) * follow;
+      tilt = reduced ? mood.tilt : tilt + (mood.tilt - tilt) * follow;
+      red = reduced ? wantedRed : red + (wantedRed - red) * follow;
       pointerX += ((reduced ? 0 : targetX) - pointerX) * follow;
       pointerY += ((reduced ? 0 : targetY) - pointerY) * follow;
-      const parallaxX = reduced ? 0 : pointerX * 0.35;
-      const parallaxY = reduced ? 0 : pointerY * 0.29;
-      const breathe = reduced ? 0
-        : Math.sin(clock * (0.9 + feel.pulse * 1.4)) * (0.006 + feel.pulse * 0.006)
-          + (idle ? Math.sin(clock * 0.37) * 0.0035 : 0);
-      const radius = baseRadius * (1 + (reduced ? 0 : energy * 0.035) + breathe) * feel.scale;
-      // Inclinação de perspectiva: "curioso" vira o disco para olhar de lado.
-      const tilt = reduced ? 0 : feel.tilt + Math.sin(clock * 0.6) * feel.tilt * 0.35 + (idle ? Math.sin(clock * 0.29) * 0.022 : 0);
-      const tiltCos = Math.cos(tilt), tiltSin = Math.sin(tilt);
-      // Keep a frontal view. Near and far planes slide in opposite directions.
-      const project = (x: number, y: number, z: number): Point => {
-        const y2 = y * tiltCos - z * tiltSin;
-        const z2 = y * tiltSin + z * tiltCos;
-        const scale = radius * 3.9 / (3.9 - z2);
-        return {
-          x: center + (x + z2 * parallaxX) * scale,
-          y: center + (y2 + z2 * parallaxY) * scale,
-        };
+      if (!reduced) {
+        clock += dt;
+        rotation += dt * mood.speed * (current === "thinking" ? 1.85 : 1 + energy * 0.5);
+      }
+      const radius = size * 0.375 * (1 + (reduced ? 0 : Math.sin(clock * 0.9) * 0.006 + energy * 0.025));
+      const yaw = -0.25 + (reduced ? 0 : Math.sin(rotation * 0.35) * 0.16 + pointerX * 0.36);
+      const pitch = -0.18 + (reduced ? 0 : pointerY * 0.35 + tilt + Math.sin(clock * 0.23) * 0.06);
+      const cy = Math.cos(yaw), sy = Math.sin(yaw), cx = Math.cos(pitch), sx = Math.sin(pitch);
+      const project = (p: Vec): Vec => {
+        const x = p.x * cy + p.z * sy;
+        const z = -p.x * sy + p.z * cy;
+        const y = p.y * cx - z * sx;
+        const depth = p.y * sx + z * cx;
+        const scale = radius * 4.8 / (4.8 - depth);
+        return { x: center + x * scale, y: center + y * scale, z: depth };
       };
-      const polar = (r: number, a: number, z: number) => project(Math.cos(a) * r, Math.sin(a) * r, z);
-      const line = (a: Point, b: Point) => { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); };
-      const scanAngle = reduced ? -0.85 : -0.85 + rotation * 0.51;
-      const scanLight = (angle: number) => Math.max(0, Math.cos(angle - scanAngle)) ** (20 * feel.sweep);
-      const arcPath = (r: number, z: number, start: number, end: number, reverse = false) => {
-        const count = Math.max(3, Math.ceil(Math.abs(end - start) * (small ? 13 : 27)));
-        for (let i = 0; i <= count; i++) {
-          const a = reverse ? end - (end - start) * i / count : start + (end - start) * i / count;
-          const p = polar(r, a, z);
-          if (i === 0 && !reverse) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-        }
+      const ink = (alpha: number, pale = false) => `rgba(255,${Math.round((pale ? 223 : 164) - red * (pale ? 82 : 100))},${pale ? 132 : 37},${Math.min(1, Math.max(0, alpha))})`;
+      const node = (p: Vec, strength: number) => {
+        const s = Math.max(0.6, unit * strength);
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, s * 6);
+        glow.addColorStop(0, ink(0.65)); glow.addColorStop(0.25, ink(0.22)); glow.addColorStop(1, ink(0));
+        ctx.fillStyle = glow; ctx.fillRect(p.x - s * 6, p.y - s * 6, s * 12, s * 12);
+        ctx.beginPath(); ctx.arc(p.x, p.y, s * 0.65, 0, TAU); ctx.fillStyle = ink(0.95, true); ctx.fill();
       };
-      const arc = (r: number, z: number, start: number, end: number, width: number, rgb: Color, alpha: number) => {
-        ctx.beginPath(); arcPath(r, z, start, end);
-        ctx.lineWidth = Math.max(0.45, width * unit);
-        ctx.strokeStyle = color(rgb, alpha); ctx.stroke();
-      };
-      const face = (points: Point[], fill: string) => {
-        ctx.beginPath();
-        points.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
-        ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
-      };
-      const annulus = (r: number, width: number, z: number, start: number, end: number, fill: string | CanvasGradient) => {
-        ctx.beginPath();
-        arcPath(r + width / 2, z, start, end);
-        arcPath(r - width / 2, z, start, end, true);
-        ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
-      };
-      const wall = (r: number, width: number, z: number, thickness: number, start: number, end: number, rgb: Color) => {
-        const steps = Math.max(2, Math.ceil((end - start) * (small ? 10 : 20)));
-        for (let edge = 0; edge < 2; edge++) {
-          const edgeR = r + (edge === 0 ? width / 2 : -width / 2);
-          for (let i = 0; i < steps; i++) {
-            const a = start + (end - start) * i / steps;
-            const b = start + (end - start) * (i + 1) / steps;
-            const middle = (a + b) / 2;
-            const facing = (Math.cos(middle) * parallaxX + Math.sin(middle) * parallaxY) * (edge === 0 ? 1 : -1);
-            if (facing <= 0) continue;
-            const light = 0.23 + facing * 0.32;
-            face([polar(edgeR, a, z - thickness), polar(edgeR, b, z - thickness), polar(edgeR, b, z), polar(edgeR, a, z)],
-              color([rgb[0] * light, rgb[1] * light, rgb[2] * light], 0.16 + facing * 0.4));
-          }
-        }
-        if (end - start < TAU - 0.01) {
-          for (const a of [start, end]) {
-            face([polar(r - width / 2, a, z - thickness), polar(r + width / 2, a, z - thickness),
-              polar(r + width / 2, a, z), polar(r - width / 2, a, z)],
-              color(rgb, 0.38));
-          }
-        }
-      };
-      const glassRing = (r: number, z: number, width: number, thickness: number, phase: number) => {
-        // Interrupted transparent planes show the gap and the geometry behind them.
-        for (const offset of [0, 2.05, 4.3]) {
-          const start = phase + offset;
-          const end = start + (offset === 2.05 ? 1.72 : 1.36);
-          wall(r, width, z, thickness, start, end, cyan);
-          annulus(r, width, z, start, end, color(cyan, 0.066));
-          arc(r + width / 2, z - thickness, start, end, 1, cyan, 0.36);
-          arc(r + width / 2, z, start, end, 1.15, cyan, 0.61);
-          arc(r - width / 2, z, start, end, 0.65, ice, 0.23);
-        }
-      };
-      const band = (r: number, z: number, start: number, end: number, width: number, rgb: Color, alpha: number) => {
-        if (width > 0.025) wall(r, width, z, 0.075, start, end, rgb);
-        annulus(r, width, z, start, end, color(rgb, alpha));
-        arc(r + width / 2, z, start, end, 1.3, ice, alpha * 0.75);
-      };
-      const luminousArc = (r: number, z: number, start: number, end: number, rgb: Color, width: number) => {
-        ctx.beginPath(); arcPath(r, z, start, end);
-        for (const [spread, opacity] of [[2.7, 0.055], [1.7, 0.14], [1, 0.58]]) {
-          ctx.lineWidth = Math.max(0.6, width * unit * spread);
-          ctx.strokeStyle = color(rgb, opacity * (1 + energy * 0.45));
-          ctx.stroke();
-        }
-        ctx.lineWidth = Math.max(0.6, width * unit * 0.23);
-        ctx.strokeStyle = color(ice, 0.76);
-        ctx.stroke();
-      };
-      const node = (r: number, a: number, z: number, rgb: Color, nodeSize: number) => {
-        const p = polar(r, a, z), s = Math.max(0.65, nodeSize * unit);
-        const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, s * 5);
-        halo.addColorStop(0, color(rgb, 0.45)); halo.addColorStop(1, color(rgb, 0));
-        ctx.fillStyle = halo; ctx.fillRect(p.x - s * 5, p.y - s * 5, s * 10, s * 10);
-        ctx.beginPath(); ctx.arc(p.x, p.y, s, 0, TAU);
-        ctx.fillStyle = color(rgb, 0.95); ctx.fill();
-        ctx.beginPath(); ctx.arc(p.x - s * 0.15, p.y - s * 0.15, s * 0.4, 0, TAU);
-        ctx.fillStyle = color(ice, 0.9); ctx.fill();
-      };
-
       ctx.clearRect(0, 0, size, size);
-      ctx.globalAlpha = feel.dim;
-      ctx.lineCap = "butt";
-      const emitter = project(0, 0, -0.54);
-      const aura = ctx.createRadialGradient(emitter.x, emitter.y, 0, emitter.x, emitter.y, radius * 1.23 * feel.glow);
-      aura.addColorStop(0, color(cyan, 0.11 + energy * 0.1));
-      aura.addColorStop(0.5, color(cyan, 0.047 + energy * 0.035));
-      aura.addColorStop(0.83, color(cyan, 0.05 + energy * 0.04));
-      aura.addColorStop(1, color(cyan, 0));
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      // A faint volume glow leaves the interior transparent and the tiny emitter readable.
+      const aura = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.12);
+      aura.addColorStop(0, ink(0.045)); aura.addColorStop(0.7, ink(0.025)); aura.addColorStop(1, ink(0));
       ctx.fillStyle = aura; ctx.fillRect(0, 0, size, size);
-      arc(1.065, -0.63, 0, TAU, 0.8, cyan, 0.2);
-      arc(1.055, -0.33, 0.15, TAU - 0.12, 0.9, cyan, 0.28);
-      arc(1.075, -0.52, 0.6, 2.45, 1.1, amber, 0.48);
-      ctx.beginPath();
-      const cageLines = small ? 18 : 48;
-      for (let i = 0; i < cageLines; i++) {
-        const a = i / cageLines * TAU + rotation * 0.012;
-        line(polar(1.065, a, -0.63), polar(1.055, a, -0.33));
+      // Local pools of projected light interrupt the precision of the circuit edges.
+      for (const [x, y, z, spread, opacity] of [
+        [-0.58, -0.32, 0.2, 0.32, 0.095], [-0.64, 0.2, 0.1, 0.25, 0.07],
+        [0.18, -0.66, 0.3, 0.23, 0.065], [0.42, 0.48, -0.1, 0.26, 0.055],
+        [-0.15, -0.12, 0.3, 0.33, 0.08], [-0.4, 0.79, 0.1, 0.2, 0.055],
+      ]) {
+        const p = project({ x, y, z });
+        const haze = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * spread);
+        haze.addColorStop(0, ink(opacity)); haze.addColorStop(0.4, ink(opacity * 0.65)); haze.addColorStop(1, ink(0));
+        ctx.fillStyle = haze; ctx.fillRect(p.x - radius * spread, p.y - radius * spread, radius * spread * 2, radius * spread * 2);
       }
-      ctx.strokeStyle = color(cyan, 0.19); ctx.lineWidth = Math.max(0.4, unit * 0.65); ctx.stroke();
-
-      // Short light guides reveal the separation between the outer planes.
-      for (const angle of [-2.65, -0.38, 0.74, 2.25]) {
-        const rear = polar(0.92, angle, -0.48);
-        const front = polar(0.92, angle, 0.22);
-        const light = ctx.createLinearGradient(rear.x, rear.y, front.x, front.y);
-        light.addColorStop(0, color(cyan, 0.03));
-        light.addColorStop(0.75, color(cyan, 0.36 + energy * 0.2));
-        light.addColorStop(1, color(ice, 0.7));
+      for (const trace of traces) {
+        const points = trace.points.map(project);
+        const mid = points[points.length >> 1];
+        const front = (mid.z + 1) / 2;
+        const scan = reduced ? 0 : Math.pow(Math.max(0, Math.cos(trace.seed * 0.53 - clock * (current === "thinking" ? 2.2 : 0.7))), 16);
+        const mass = mid.x < center - radius * 0.2 ? 1.35 : mid.y > center + radius * 0.3 ? 0.85 : 1;
+        const alpha = (0.12 + front * 0.4 + scan * 0.18 + energy * 0.12 + heat * 0.1) * (trace.bright ? 1.8 : 1) * mass;
         ctx.beginPath();
-        line(rear, front);
-        ctx.strokeStyle = light;
-        ctx.lineWidth = Math.max(0.65, unit * 1.35);
-        ctx.stroke();
-      }
-
-      ctx.beginPath();
-      for (let i = 0; i < (small ? 4 : 8); i++) {
-        const a = i / (small ? 4 : 8) * TAU + rotation * 0.012;
-        for (let j = 0; j < RINGS.length - 1; j++) {
-          const rear = RINGS[j], front = RINGS[j + 1];
-          line(polar(rear.radius - 0.015, a, rear.depth - 0.06), polar(front.radius + 0.015, a, front.depth - 0.06));
+        points.forEach((p, i) => { if (!i) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+        if (trace.fill) { ctx.fillStyle = ink(trace.fill); ctx.fill(); }
+        ctx.lineWidth = Math.max(0.3, unit * trace.weight * (0.7 + front * 0.5));
+        const isPlate = trace.seed >= 2500 && trace.seed < 2507;
+        ctx.setLineDash(isPlate ? [unit * 11, unit * 4, unit * 2, unit * 7] : []);
+        ctx.strokeStyle = ink(alpha * (isPlate ? 0.45 : 1), trace.bright || trace.seed % 13 === 0); ctx.stroke();
+        ctx.setLineDash([]);
+        if (trace.weight > 1.8 || trace.bright) {
+          ctx.lineWidth = Math.max(1, unit * 7); ctx.strokeStyle = ink(alpha * 0.11); ctx.stroke();
+        }
+        if (trace.terminal && mid.z > -0.4) node(points[points.length - 1], 0.7 + front * 0.65 + scan * 0.6);
+        // A moving packet follows a physical circuit instead of floating over the canvas.
+        if (!reduced && trace.points.length > 5 && trace.seed % (small ? 9 : 7) === 0) {
+          const index = Math.floor((clock * (0.28 + energy * 0.3) + random(trace.seed)) % 1 * points.length);
+          node(points[index], 1.1 + energy * 0.7);
         }
       }
-      ctx.strokeStyle = color(cyan, 0.18); ctx.lineWidth = Math.max(0.5, unit * 1.05); ctx.stroke();
-
-      // A recessed reticle leaves its center empty.
-      const aperture = APERTURE.map(([x, y]) => project(x * feel.aperture, y * feel.aperture, -0.3));
-      face(aperture, color(cyan, 0.035));
-      ctx.beginPath();
-      for (const edge of [0, 1, 3, 4, 6]) {
-        line(aperture[edge], aperture[(edge + 1) % aperture.length]);
+      // White-gold emitter: a hot, incomplete spiral with horizontal optical streaks.
+      const core = project({ x: -0.095, y: -0.035, z: 0.12 });
+      const bloom = ctx.createRadialGradient(core.x, core.y, 0, core.x, core.y, radius * 0.38);
+      bloom.addColorStop(0, ink(0.65, true)); bloom.addColorStop(0.16, ink(0.24));
+      bloom.addColorStop(0.48, ink(0.045)); bloom.addColorStop(1, ink(0));
+      ctx.fillStyle = bloom; ctx.fillRect(core.x - radius * 0.38, core.y - radius * 0.38, radius * 0.76, radius * 0.76);
+      // Unequal optical streaks spill diagonally from the hot left lip of the core.
+      for (let j = 0; j < 7; j++) {
+        const x = core.x - radius * 0.04, y = core.y - radius * (0.045 + j * 0.008);
+        const endX = x + radius * (0.4 + random(j + 94) * 0.37);
+        const endY = y - radius * (0.015 + random(j + 55) * 0.12);
+        const flare = ctx.createLinearGradient(x - radius * 0.11, y, endX, endY);
+        flare.addColorStop(0, ink(0)); flare.addColorStop(0.15, ink(0.32, true)); flare.addColorStop(0.4, ink(0.13)); flare.addColorStop(1, ink(0));
+        ctx.beginPath(); ctx.moveTo(x - radius * 0.11, y + radius * 0.01); ctx.lineTo(endX, endY);
+        ctx.lineWidth = Math.max(1, unit * (j % 2 ? 8 : 2)); ctx.strokeStyle = flare; ctx.stroke();
       }
-      ctx.strokeStyle = color(ice, 0.69 + energy * 0.21);
-      ctx.lineWidth = Math.max(0.7, unit * 1.45);
-      ctx.stroke();
-      ctx.beginPath();
-      for (const edge of [2, 5, 7]) {
-        line(aperture[edge], aperture[(edge + 1) % aperture.length]);
-      }
-      ctx.strokeStyle = color(cyan, 0.25);
-      ctx.lineWidth = Math.max(0.5, unit);
-      ctx.stroke();
-
-      // Pulsos concêntricos: a "batida" muda de ritmo conforme a emoção.
-      if (!reduced && feel.pulse > 0.2) {
-        const period = 2.6 / Math.max(0.4, feel.pulse);
-        for (let p = 0; p < 2; p++) {
-          const age = (clock / period + p * 0.5) % 1;
-          const ringRadius = 0.18 + age * 0.95;
-          const alpha = (1 - age) ** 2 * 0.5 * Math.min(1, feel.pulse);
-          arc(ringRadius, -0.1 + age * 0.12, 0, TAU, 1.1 + age * 1.6, p === 0 ? cyan : amber, alpha);
-        }
-      }
-
-      for (const { ring, index } of PAINT_ORDER) {
-        const r = ring.radius + (reduced ? 0 : Math.sin(clock * 6.3 + index) * 0.003 * feel.jitter);
-        const z = ring.depth + (reduced ? 0 : energy * ring.depth * 0.17 + Math.sin(clock * 8.5 + index * 1.7) * 0.014 * feel.jitter);
-        const spin = ring.phase + rotation * ring.speed;
-        const count = small ? Math.floor(ring.ticks / 2) : ring.ticks;
-        const principal = index === 0 || index === 1 || index === 3 || index === 5;
-        if (principal) glassRing(r - 0.012, z - 0.012, index === 5 ? 0.082 : 0.058, index === 0 ? 0.115 : 0.09, spin);
-        arc(r, z, 0, TAU, principal ? 1.1 : 0.6, cyan, principal ? 0.48 : 0.16);
-        arc(r - 0.046, z - 0.025, 0, TAU, 0.7, cyan, principal ? 0.22 : 0.1);
+      for (let j = 0; j < 9; j++) {
         ctx.beginPath();
-        for (let i = 0; i < count; i++) {
-          const a = spin + i / count * TAU;
-          const length = i % 8 === 0 ? 0.037 : 0.012 + (i % 3) * 0.004;
-          line(polar(r - 0.015, a, z), polar(r - 0.015 - length, a, z));
+        for (let k = 0; k <= 60; k++) {
+          const a = k / 60 * (3.4 + j * 0.21) + j * 0.7 + (reduced ? 0 : Math.sin(rotation) * 0.18);
+          const r = 0.045 + j * 0.014 + k / 60 * 0.025 + Math.sin(k * 0.45 + j) * 0.002;
+          const p = project({ x: -0.095 + Math.cos(a) * r, y: -0.035 + Math.sin(a) * r * 0.88, z: 0.12 + j * 0.012 });
+          if (!k) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
         }
-        ctx.strokeStyle = color(index === 3 ? amber : cyan, (principal ? 0.58 : 0.24) + energy * 0.15);
-        ctx.lineWidth = Math.max(0.5, (index === 0 ? 1.6 : 1.05) * unit); ctx.stroke();
-        if (index <= 4) {
-          ctx.beginPath();
-          for (let i = 0; i < count; i++) {
-            const a = spin + i / count * TAU;
-            const strength = scanLight(a - index * 0.13);
-            if (strength < 0.21) continue;
-            line(polar(r + 0.005, a, z), polar(r - 0.02 - strength * 0.042, a, z));
-          }
-          ctx.strokeStyle = color(index === 3 ? amber : ice, 0.62 + energy * 0.22);
-          ctx.lineWidth = Math.max(0.6, unit * 1.35);
-          ctx.stroke();
-        }
-        if (!small) {
-          ctx.beginPath();
-          for (let i = 0; i < count; i++) {
-            if ((i + index) % 5 === 0) continue;
-            const a = spin * -0.65 + i / count * TAU;
-            line(polar(r - 0.068, a, z - 0.025), polar(r - 0.073, a, z - 0.025));
-          }
-          ctx.strokeStyle = color(index % 3 === 0 ? amber : ice, principal ? 0.4 : 0.19);
-          ctx.lineWidth = unit * 1.25; ctx.stroke();
-        }
-        // Asymmetric arcs carry the reference's cyan / amber silhouette.
-        if (index <= 4 && index !== 2) {
-          const start = -2.95 + spin * 0.4 + index * 0.72;
-          const end = start + (index === 0 ? 1.85 : 1.36);
-          if (principal) luminousArc(r - 0.005, z, start, end, cyan, index === 0 ? 5 : 3.8);
-          band(r - 0.005, z, start, end, index <= 1 ? 0.027 : 0.018, cyan, principal ? 0.77 : 0.5);
-          band(r - 0.005, z, start + 3.15, end + 2.3, 0.012, cyan, principal ? 0.76 : 0.4);
-        }
-        if (index === 5) {
-          const start = -1.66 + rotation * 0.045;
-          luminousArc(r - 0.007, z, start, start + 1.38, amber, 6);
-          for (let i = 0; i < 7; i++) {
-            const a = start + i * 0.205;
-            band(r - 0.007, z, a, a + 0.185, 0.046, amber, 0.9);
-          }
-          for (let i = 0; i < 4; i++) {
-            const a = start + 3.1 + i * 0.24;
-            band(r - 0.007, z, a, a + 0.215, 0.04, amber, 0.85);
-          }
-          luminousArc(r - 0.007, z, start + 1.5, start + 2.65, cyan, 5);
-          band(r - 0.007, z, start + 1.5, start + 2.65, 0.037, cyan, 0.82);
-        }
-        if (index === 6) {
-          arc(r, z, 2.45 - rotation * 0.04, 3.32 - rotation * 0.04, 1.8, cyan, 0.59);
-          arc(r, z, -1.12 - rotation * 0.04, -0.3 - rotation * 0.04, 1.8, cyan, 0.52);
-        }
-        for (let j = 0; j < (small ? 2 : 4); j++) {
-          const a = spin + j * TAU / 4;
-          band(r, z + 0.015, a, a + (index % 2 ? 0.045 : 0.065), 0.022, cyan, principal ? 0.9 : 0.42);
-        }
-        if (index % 2 === 0) {
-          const a = spin + 0.9;
-          node(r, a, z + 0.025, index === 4 ? amber : cyan, index === 0 ? 3 : 2.2);
-          if (!small) node(r, a + 2.8, z, amber, 1.8);
-        }
+        ctx.lineWidth = Math.max(0.55, unit * (j % 3 === 0 ? 2.1 : 0.7));
+        ctx.strokeStyle = ink(j < 4 ? 0.9 : 0.38, true); ctx.stroke();
+        ctx.lineWidth = unit * 5; ctx.strokeStyle = ink(0.08); ctx.stroke();
       }
-      // Poeira orbital: quantidade e velocidade acompanham a emoção.
-      const motes = small ? 0 : Math.round(3 + feel.spark * 8);
-      for (let i = 0; i < motes; i++) {
-        const seed = i * 2.399;
-        const orbit = 0.44 + ((i * 37) % 100) / 100 * 0.6;
-        const direction = i % 2 ? -1 : 1;
-        const a = seed + clock * (0.32 + (i % 3) * 0.2) * feel.spin * direction;
-        const z = -0.18 + Math.sin(clock * 1.15 + seed) * 0.3;
-        node(orbit, a, z, i % 4 === 0 ? amber : cyan, 0.75 + (i % 3) * 0.3);
-      }
-
-      // Faíscas curtas: só aparecem em emoções agitadas.
-      if (!reduced && feel.jitter > 0.15) {
-        ctx.beginPath();
-        for (let i = 0; i < 16; i++) {
-          if (Math.sin(clock * 11 + i * 3.7) < 0.35) continue;
-          const a = i * 0.393 + clock * 1.6;
-          const z = -0.2 + Math.sin(a * 2.3) * 0.22;
-          line(polar(1.02, a, z), polar(1.02 + 0.04 + feel.jitter * 0.06, a, z));
-        }
-        ctx.strokeStyle = color(amber, 0.32 * feel.jitter);
-        ctx.lineWidth = Math.max(0.6, unit * 1.15);
-        ctx.stroke();
-      }
-
-      for (let i = 0; i < (small ? 3 : 7); i++) {
-        const a = i * 2.399 + rotation * (i % 2 ? -0.02 : 0.028);
-        node(1.07 + (i % 3) * 0.025, a, -0.33 + Math.sin(a) * 0.19, i % 3 ? cyan : amber, i % 3 ? 1.8 : 2.9);
-      }
-      ctx.globalAlpha = 1;
+      node({ ...core, x: core.x - radius * 0.035, y: core.y - radius * 0.06 }, 3.2 + energy * 1.5);
+      ctx.beginPath(); ctx.moveTo(core.x - radius * 0.25, core.y - radius * 0.06); ctx.lineTo(core.x + radius * 0.56, core.y - radius * 0.06);
+      ctx.lineWidth = Math.max(0.4, unit * 0.7); ctx.strokeStyle = ink(0.55, true); ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
     };
     frame = frameWindow.requestAnimationFrame(draw);
     return () => {
@@ -501,7 +303,7 @@ export function Orb({ state = "idle", tone = "blue", emotion, energyRef, size = 
   }, [size, energyRef]);
 
   return (
-    <div className={`orb orb--${state} orb--${tone} orb--${emotion ?? "calm"} ${className}`} style={{ width: size, height: size }} aria-hidden>
+    <div className={`orb orb--${state} orb--${tone} orb--${resolvedEmotion} ${className}`} style={{ width: size, height: size }} aria-hidden>
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
     </div>
   );

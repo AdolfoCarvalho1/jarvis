@@ -140,6 +140,16 @@ function shortDate(iso: string | null): string {
   }).format(date);
 }
 
+function clockTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  }).format(date);
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(`GET ${url} → ${response.status}`);
@@ -1068,13 +1078,36 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     router.refresh();
   }
 
+  // Rótulo único de estado, usado no palco (modo esfera) e na linha do composer.
+  const orbStatusLabel = transcribing ? "Transcrevendo"
+    : voicePhase === "opening" ? "Abrindo microfone"
+    : heardSpeech ? "Ouvindo"
+    : speaking ? "Falando"
+    : pending ? "Processando"
+    : listening ? "Ouvindo"
+    : remoteState !== "idle" ? "Navegador em atividade"
+    : "Em repouso";
+
   return (
-    <div className={`shell ${hud ? "shell--hud" : ""} ${showTranscript ? messages.length === 0 && !pending ? "shell--empty" : "" : "shell--hologram"}`}
-      data-hud={hud ? "assistant" : undefined}>
+    <div
+      className={`jv-app shell ${hud ? "shell--hud" : ""} ${
+        showTranscript ? (messages.length === 0 && !pending ? "shell--empty" : "") : "shell--hologram"
+      }`}
+      data-hud={hud ? "assistant" : undefined}
+    >
+      <style>{APP_CSS}</style>
+
       <header className="topbar">
         <div className="brand-min" title={hud ? "Arraste aqui para mover a janela" : undefined}>
+          <i className="brand-mark" aria-hidden="true" />
           J.<span>A.</span>R.<span>V.</span>I.<span>S.</span>
         </div>
+        {!hud ? (
+          <p className="top-status" data-ok={status?.ok === false ? "0" : "1"}>
+            <i aria-hidden="true" />
+            {status?.ok === false ? "Offline" : "Sistema ativo"}
+          </p>
+        ) : null}
         <div className="top-actions">
           <label className="model-picker">
             <span className="sr-only">Modelo</span>
@@ -1121,11 +1154,20 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
         </div>
       </header>
 
-      <section className={`hero ${showTranscript ? "is-compact" : ""}`} data-state={orbState}>
+      <section className={`hero ${showTranscript ? "is-compact" : ""}`} data-state={orbState} aria-label="Orbe do J.A.R.V.I.S.">
         <div className="hologram-stage">
           <Orb className="hologram-orb" state={orbState} size={showTranscript ? (hud ? 76 : 114) : (hud ? 200 : 540)} tone={tone} emotion={orbEmotion} energyRef={energyRef} />
         </div>
-        {!showTranscript ? <AudioTrace active={listening || speaking} source={listening ? micAnalyserRef : analyserRef} /> : null}
+        {!showTranscript ? (
+          <>
+            <p className="hero-caption">
+              <b>{orbStatusLabel}</b>
+              <span aria-hidden="true">·</span>
+              NÚCLEO 01
+            </p>
+            <AudioTrace active={listening || speaking} source={listening ? micAnalyserRef : analyserRef} />
+          </>
+        ) : null}
       </section>
 
       <div className="content" id="jarvis-transcript" hidden={!showTranscript}>
@@ -1140,6 +1182,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
         </button> : null}
         {messages.length === 0 && !pending ? (
           <div className="chat-empty">
+            <p className="chat-kicker">Núcleo 01 · canal direto</p>
             <h1>Como posso ajudar?</h1>
             <p>Escreva uma mensagem ou use o microfone para falar com o Jarvis.</p>
           </div>
@@ -1149,12 +1192,16 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
             const operation = readOperation(message.content);
             return operation ? <Operation key={message.id} event={operation} /> : null;
           }
+          const stamp = clockTime(message.created_at);
           return (
           <article
             key={message.id}
             className={`msg ${message.role === "user" ? "msg--user" : "msg--jarvis"}`}
           >
-            <p className="msg-author">{message.role === "user" ? "Você" : "Jarvis"}</p>
+            <p className="msg-author">
+              {message.role === "user" ? "Você" : "Jarvis"}
+              {stamp ? <span className="msg-time">{stamp}</span> : null}
+            </p>
             <div className="msg-body">
               {message.role === "user" ? (
                 <p>{message.content}</p>
@@ -1181,6 +1228,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
 
         {streamText ? (
           <article className="msg msg--jarvis">
+            <p className="msg-author">Jarvis<span className="msg-time">ao vivo</span></p>
             <div className="msg-body">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamText}</ReactMarkdown>
               <span className="caret" />
@@ -1229,6 +1277,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
             void submitMessage();
           }}
         >
+          <span className="composer-label" aria-hidden="true">Pergunte ou fale</span>
           <textarea
             ref={textareaRef}
             value={input}
@@ -1274,9 +1323,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
               });
             }}>Revisar operação</button>
           ) : (
-            <span role="status">{transcribing ? "Transcrevendo" : voicePhase === "opening" ? "Abrindo microfone"
-              : heardSpeech ? "Ouvindo" : speaking ? "Falando" : pending ? "Processando" : listening ? "Ouvindo"
-              : remoteState !== "idle" ? "Navegador em atividade" : "Em repouso"}</span>
+            <span role="status">{orbStatusLabel}</span>
           )}
           {Object.values(timing).some((value) => typeof value === "number") || perf ? (
             <details className="latency">
@@ -1294,7 +1341,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
       </footer>
 
       {drawer ? <button className="drawer-backdrop" aria-label="Fechar" onClick={() => setDrawer(null)} /> : null}
-      <aside className={`drawer ${drawer ? "is-open" : ""}`}>
+      <aside className={`drawer ${drawer ? "is-open" : ""}`} aria-label="Painel do Jarvis">
         <header className="drawer-head">
           <div className="tabs">
             <button className={drawer === "memoria" ? "is-active" : ""} onClick={() => setDrawer("memoria")}>
@@ -1440,3 +1487,1190 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     </div>
   );
 }
+
+const APP_CSS = `
+  .jv-app {
+    color-scheme: dark;
+    color: var(--jv-text);
+    font-family: var(--font-ui);
+    background: transparent;
+  }
+
+  /* ————— casca ————— */
+  .jv-app.shell {
+    height: 100dvh;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 clamp(18px, 4vw, 38px);
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    background: transparent;
+  }
+  .jv-app.shell--hologram { grid-template-rows: auto minmax(0, 1fr) auto; }
+  .jv-app.shell--empty { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .jv-app.shell--hud {
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    height: 100%;
+    padding-right: clamp(14px, 2vw, 26px);
+    padding-left: clamp(14px, 2vw, 26px);
+    overflow: hidden;
+  }
+
+  /* ————— topbar ————— */
+  .jv-app .topbar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-height: 62px;
+    padding: 0;
+    border-bottom: 1px solid var(--jv-line);
+  }
+  .jv-app.shell--hud .topbar { min-height: 52px; }
+
+  .jv-app .brand-min {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font: 700 12px/1 var(--font-ui);
+    letter-spacing: 0.2em;
+    color: var(--jv-text);
+    white-space: nowrap;
+  }
+  .jv-app .brand-min span { color: inherit; }
+  .jv-app .brand-mark {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    background: var(--jv-accent);
+    transform: rotate(45deg);
+    font-style: normal;
+  }
+
+  .jv-app .top-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 auto 0 0;
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+    white-space: nowrap;
+  }
+  .jv-app .top-status i {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--jv-accent);
+  }
+  .jv-app .top-status[data-ok="0"] { color: var(--jv-danger); }
+  .jv-app .top-status[data-ok="0"] i { background: var(--jv-danger); }
+
+  .jv-app .top-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin-left: auto;
+  }
+
+  .jv-app .model-picker { position: relative; display: inline-flex; min-width: 0; align-items: center; }
+  .jv-app .model-picker::after {
+    content: "";
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    border-right: 1px solid var(--jv-dim);
+    border-bottom: 1px solid var(--jv-dim);
+    transform: translateY(-70%) rotate(45deg);
+    pointer-events: none;
+  }
+  .jv-app .model-picker select {
+    appearance: none;
+    max-width: 240px;
+    padding: 8px 18px 8px 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    font: 500 10px/1.2 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+    cursor: pointer;
+    outline: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.16s ease;
+  }
+  .jv-app .model-picker select:hover,
+  .jv-app .model-picker select:focus { color: var(--jv-text); }
+  .jv-app .model-picker option {
+    background: var(--jv-bg-2);
+    color: var(--jv-text);
+    font: 400 13px/1.4 var(--font-ui);
+    text-transform: none;
+  }
+
+  .jv-app .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    color: var(--jv-muted);
+    transition: color 0.16s ease;
+  }
+  .jv-app .top-actions .icon-btn,
+  .jv-app .composer .icon-btn { width: 32px; height: 32px; }
+  .jv-app .composer .icon-btn { width: 34px; height: 34px; }
+  .jv-app .icon-btn:hover { color: var(--jv-text); background: none; }
+  .jv-app .icon-btn.is-on { color: var(--jv-accent); }
+  .jv-app .icon-btn svg { width: 16px; height: 16px; }
+
+  /* ————— palco do orbe ————— */
+  .jv-app .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    min-height: 0;
+    padding: 0;
+  }
+  .jv-app .hero.is-compact { padding: 20px 0 6px; }
+  .jv-app.shell--empty .hero.is-compact { align-self: center; padding: 18px 0 6px; }
+
+  .jv-app .hologram-stage {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    place-items: center;
+    flex: 0 1 auto;
+    inline-size: min(100%, 96px);
+    aspect-ratio: 1;
+  }
+  .jv-app .hero.is-compact .hologram-stage { inline-size: 104px; }
+  .jv-app.shell--hologram .hologram-stage { inline-size: min(86%, 54dvh, 560px); }
+  .jv-app.shell--empty .hologram-stage { inline-size: min(58%, 132px); }
+  .jv-app.shell--empty .hero.is-compact .hologram-stage { inline-size: 128px; }
+
+  .jv-app .hologram-stage .hologram-orb {
+    inline-size: 100% !important;
+    block-size: 100% !important;
+  }
+  .jv-app .hologram-stage canvas { inline-size: 100%; block-size: 100%; }
+
+  .jv-app .hologram-stage::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -22%;
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(255, 132, 26, 0.13), rgba(255, 110, 10, 0.035) 48%, transparent 72%);
+    filter: blur(10px);
+    animation: jvHalo 7s ease-in-out infinite;
+  }
+  .jv-app .hero.is-compact .hologram-stage::before {
+    inset: -28%;
+    background: radial-gradient(circle, rgba(255, 132, 26, 0.16), transparent 70%);
+  }
+  .jv-app .hologram-stage::after { display: none; }
+  .jv-app.shell--hologram .hologram-stage::before {
+    inset: -6%;
+    background: radial-gradient(circle, rgba(255, 130, 20, 0.15), rgba(255, 92, 10, 0.03) 46%, transparent 70%);
+    filter: blur(22px);
+  }
+  @keyframes jvHalo {
+    0%, 100% { opacity: 0.7; transform: scale(0.97); }
+    50% { opacity: 1; transform: scale(1.03); }
+  }
+
+  .jv-app .hero-caption {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 14px 0 0;
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--jv-dim);
+    white-space: nowrap;
+  }
+  .jv-app .hero-caption b { font-weight: 500; color: var(--jv-muted); }
+  .jv-app .hero[data-state="thinking"] .hero-caption b,
+  .jv-app .hero[data-state="listening"] .hero-caption b,
+  .jv-app .hero[data-state="speaking"] .hero-caption b { color: var(--jv-accent-2); }
+
+  .jv-app .hologram-trace {
+    display: block;
+    inline-size: min(62%, 340px);
+    block-size: 26px;
+    flex: none;
+    margin-top: 10px;
+    opacity: 0.75;
+  }
+
+  /* ————— conversa ————— */
+  .jv-app .content { min-height: 0; display: flex; flex-direction: column; }
+  .jv-app .stage {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px 0 20px;
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: var(--jv-line-strong) transparent;
+  }
+  .jv-app .stage > * {
+    max-width: 720px;
+    margin-right: auto;
+    margin-left: auto;
+  }
+  .jv-app .stage:focus-visible,
+  .jv-app.shell :is(a, button, select, summary, pre, textarea):focus-visible {
+    outline: 1px solid var(--jv-accent);
+    outline-offset: 3px;
+  }
+  .jv-app .stage:focus-visible { outline-offset: -2px; }
+
+  .jv-app .chat-empty {
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    min-height: 100%;
+    padding: 18px 0 34px;
+    text-align: left;
+  }
+  .jv-app.shell--empty .chat-empty { align-content: center; justify-items: center; text-align: center; padding-top: 6px; }
+  .jv-app .chat-kicker {
+    margin: 0 0 12px;
+    font: 500 10px/1.4 var(--font-mono);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+  }
+  .jv-app .chat-empty h1 {
+    margin: 0 0 12px;
+    color: var(--jv-text);
+    font: 600 clamp(26px, 3.4vw, 34px)/1.05 var(--font-ui);
+    letter-spacing: -0.035em;
+  }
+  .jv-app .chat-empty p {
+    margin: 0;
+    max-width: 46ch;
+    color: var(--jv-muted);
+    font: 400 13.5px/1.65 var(--font-ui);
+  }
+  .jv-app.shell--empty .chat-empty p { margin-inline: auto; }
+
+  .jv-app .history-more {
+    display: block;
+    margin: 2px auto 18px;
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    color: var(--jv-muted);
+    font: 500 10px/1.4 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.16s ease;
+  }
+  .jv-app .history-more:hover:not(:disabled) { color: var(--jv-accent); }
+  .jv-app .history-more:disabled { cursor: default; opacity: 0.6; }
+
+  .jv-app .msg { margin-top: 30px; animation: none; }
+  .jv-app .msg:first-child { margin-top: 4px; }
+  .jv-app .msg-author {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 0 0 7px;
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+  }
+  .jv-app .msg-time {
+    font: 400 10px/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    color: var(--jv-dim);
+  }
+  .jv-app .msg-body {
+    font: 400 15px/1.68 var(--font-ui);
+    color: var(--jv-text);
+    max-width: 62ch;
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+  .jv-app .msg--user .msg-body { display: block; }
+  .jv-app .msg--user .msg-body p {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    white-space: pre-wrap;
+  }
+  .jv-app .msg--jarvis .msg-body { max-width: 62ch; }
+
+  .jv-app .msg-body p { margin: 0 0 12px; }
+  .jv-app .msg-body > :last-child { margin-bottom: 0; }
+  .jv-app .msg-body strong { color: #fff; font-weight: 600; }
+  .jv-app .msg-body a {
+    color: var(--jv-accent-2);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: rgba(255, 138, 30, 0.4);
+  }
+  .jv-app .msg-body ul,
+  .jv-app .msg-body ol { margin: 0 0 12px; padding-left: 18px; }
+  .jv-app .msg-body li { margin: 5px 0; }
+  .jv-app .msg-body li::marker { color: var(--jv-dim); }
+  .jv-app .msg-body h1,
+  .jv-app .msg-body h2,
+  .jv-app .msg-body h3,
+  .jv-app .msg-body h4 {
+    margin: 20px 0 8px;
+    font: 600 15.5px/1.35 var(--font-ui);
+    letter-spacing: -0.005em;
+    color: var(--jv-text);
+  }
+  .jv-app .msg-body code {
+    font: 400 0.86em/1.5 var(--font-mono);
+    background: rgba(255, 255, 255, 0.06);
+    border: 0;
+    border-radius: 0;
+    padding: 1px 4px;
+    color: var(--jv-text);
+  }
+  .jv-app .msg-body pre {
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    background: var(--jv-bg-2);
+    border: 0;
+    border-left: 1px solid var(--jv-line-strong);
+    border-radius: 0;
+  }
+  .jv-app .msg-body pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: 400 11.5px/1.65 var(--font-mono);
+    color: var(--jv-muted);
+  }
+  .jv-app .msg-body blockquote {
+    margin: 0 0 14px;
+    padding: 2px 0 2px 14px;
+    border-left: 1px solid var(--jv-line-strong);
+    color: var(--jv-muted);
+  }
+  .jv-app .msg-body table {
+    width: 100%;
+    margin: 0 0 14px;
+    border-collapse: collapse;
+    font: 400 12.5px/1.55 var(--font-mono);
+  }
+  .jv-app .msg-body th,
+  .jv-app .msg-body td {
+    padding: 8px 12px 8px 0;
+    border: 0;
+    border-bottom: 1px solid var(--jv-line);
+    text-align: left;
+  }
+  .jv-app .msg-body th {
+    background: none;
+    color: var(--jv-dim);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+
+  .jv-app .caret {
+    display: inline-block;
+    width: 2px;
+    height: 15px;
+    margin-left: 3px;
+    background: var(--jv-accent);
+    vertical-align: -2px;
+    animation: caret 1s steps(2) infinite;
+  }
+
+  /* ————— operações / aprovação ————— */
+  .jv-app .operation {
+    position: relative;
+    margin: 22px auto 0;
+    padding: 0 0 0 15px;
+    border: 0;
+    border-left: 1px solid var(--jv-line);
+    border-radius: 0;
+    background: none;
+    color: var(--jv-muted);
+    font: 400 11.5px/1.55 var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+  .jv-app .operation::before {
+    content: "";
+    position: absolute;
+    left: -2px;
+    top: 4px;
+    width: 4px;
+    height: 4px;
+    background: var(--jv-line-strong);
+  }
+  .jv-app .operation[data-status="approval"] { border-left-color: rgba(255, 138, 30, 0.55); }
+  .jv-app .operation[data-status="approval"]::before,
+  .jv-app .operation[data-status="running"]::before { background: var(--jv-accent); }
+  .jv-app .operation[data-status="error"]::before { background: var(--jv-danger); }
+
+  .jv-app .operation header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 3px 12px;
+  }
+  .jv-app .operation header strong {
+    font: 600 11.5px/1.4 var(--font-mono);
+    letter-spacing: 0.03em;
+    color: var(--jv-text);
+  }
+  .jv-app .operation header span {
+    font: 500 10px/1.4 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+  }
+  .jv-app .operation[data-status="approval"] header span { color: var(--jv-accent-2); }
+  .jv-app .operation[data-status="error"] header span { color: var(--jv-danger); }
+  .jv-app .operation p { margin: 6px 0 0; color: var(--jv-muted); }
+  .jv-app .operation pre {
+    margin: 8px 0 0;
+    padding: 0;
+    max-height: 170px;
+    overflow: auto;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    color: var(--jv-muted);
+    font: 400 11px/1.6 var(--font-mono);
+    white-space: pre-wrap;
+    user-select: text;
+  }
+  .jv-app .operation a {
+    display: inline-block;
+    margin-top: 8px;
+    color: var(--jv-accent-2);
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+  }
+  .jv-app .operation-actions {
+    display: flex;
+    justify-content: flex-start;
+    gap: 22px;
+    margin-top: 10px;
+  }
+  .jv-app .operation-actions button {
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-muted);
+    font: 600 10.5px/1 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.16s ease;
+  }
+  .jv-app .operation-actions button:hover:not(:disabled) { color: var(--jv-text); }
+  .jv-app .operation-actions button:last-child { color: var(--jv-accent); }
+  .jv-app .operation-actions button:last-child:hover:not(:disabled) { color: var(--jv-accent-2); }
+  .jv-app .operation-actions button:disabled { opacity: 0.6; cursor: wait; }
+
+  /* ————— composer ————— */
+  .jv-app .composer-zone {
+    padding: 0 0 calc(18px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--jv-line);
+  }
+  .jv-app .composer-zone > * { max-width: 720px; margin-right: auto; margin-left: auto; }
+  .jv-app.shell--hud .composer-zone { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+
+  .jv-app .composer-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px 20px;
+    padding: 10px 0 0;
+  }
+
+  .jv-app .transcript-btn {
+    position: relative;
+    min-block-size: 28px;
+    padding: 0 0 0 10px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-dim);
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.16s ease;
+  }
+  .jv-app .transcript-btn::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 3px;
+    margin-top: -1.5px;
+    background: var(--jv-line-strong);
+  }
+  .jv-app .transcript-btn:hover { color: var(--jv-muted); }
+  .jv-app .transcript-btn.is-on,
+  .jv-app .transcript-btn[aria-pressed="true"] { color: var(--jv-text); background: none; border-color: transparent; }
+  .jv-app .transcript-btn.is-on::before,
+  .jv-app .transcript-btn[aria-pressed="true"]::before { background: var(--jv-accent); }
+  .jv-app .transcript-btn:focus-visible { outline: 1px solid var(--jv-accent); outline-offset: 3px; }
+
+  .jv-app .transcript-btn .dot {
+    position: absolute;
+    top: 2px;
+    right: -6px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--jv-accent);
+  }
+
+  .jv-app .stop-speech {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-danger);
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .jv-app .stop-speech .stop-square { width: 6px; height: 6px; }
+  .jv-app .stop-square { background: currentColor; }
+
+  .jv-app .composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 14px;
+    padding: 2px 0 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .jv-app .composer:focus-within { border: 0; box-shadow: none; }
+  .jv-app.is-listening .composer,
+  .jv-app .composer.is-listening { border: 0; }
+
+  .jv-app .composer-label {
+    flex: none;
+    padding-bottom: 11px;
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+    white-space: nowrap;
+    transition: color 0.16s ease;
+  }
+  .jv-app .composer:focus-within .composer-label { color: var(--jv-accent-2); }
+  .jv-app .composer.is-listening .composer-label { color: var(--jv-accent); }
+
+  .jv-app .composer textarea {
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    max-height: 180px;
+    padding: 6px 0 7px;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--jv-line-strong);
+    border-radius: 0;
+    outline: none;
+    resize: none;
+    font: 400 15px/1.55 var(--font-ui);
+    color: var(--jv-text);
+    caret-color: var(--jv-accent);
+    transition: border-color 0.16s ease;
+  }
+  .jv-app .composer textarea:focus { border-bottom-color: var(--jv-accent); }
+  .jv-app .composer textarea::placeholder { color: var(--jv-dim); }
+  .jv-app.shell--hud .composer textarea { max-height: 120px; }
+
+  .jv-app .composer-tools {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+    padding-bottom: 1px;
+  }
+  .jv-app .composer .icon-btn { width: 34px; height: 34px; }
+  .jv-app .mic { border: 0; background: none; }
+  .jv-app .mic:hover { color: var(--jv-text); }
+  .jv-app .mic.is-live {
+    color: var(--jv-accent);
+    animation: jvMic 1.4s ease-in-out infinite;
+  }
+  @keyframes jvMic {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+
+  .jv-app .send-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-accent);
+    transition: color 0.16s ease, opacity 0.16s ease;
+  }
+  .jv-app .send-btn:hover:not(:disabled) { color: var(--jv-accent-2); background: none; }
+  .jv-app .send-btn:disabled { opacity: 0.28; background: none; color: var(--jv-muted); }
+  .jv-app .send-btn.is-stop {
+    width: auto;
+    padding-inline: 4px 2px;
+    color: var(--jv-danger);
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .jv-app .send-btn.is-stop:hover { color: #ff9c8f; background: none; }
+  .jv-app .send-btn .stop-square { width: 7px; height: 7px; }
+
+  .jv-app .hero-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font: 500 10px/1.2 var(--font-mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+  }
+  .jv-app .hero-status::before {
+    content: "";
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--jv-muted);
+  }
+  .jv-app .composer-status { justify-content: flex-start; margin-top: 12px; }
+  .jv-app .composer-zone[data-orb="thinking"] .composer-status::before,
+  .jv-app .composer-zone[data-orb="listening"] .composer-status::before,
+  .jv-app .composer-zone[data-orb="speaking"] .composer-status::before,
+  .jv-app .composer-zone[data-speaking="1"] .composer-status::before { background: var(--jv-accent); }
+  .jv-app .composer-zone[data-tone="red"] .composer-status::before { background: var(--jv-danger); }
+
+  .jv-app .review-operation {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--jv-accent);
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-decoration: underline;
+    text-underline-offset: 0.22em;
+    cursor: pointer;
+  }
+  .jv-app .review-operation:hover { color: var(--jv-accent-2); }
+
+  .jv-app .latency { position: relative; margin-left: auto; }
+  .jv-app .latency summary {
+    color: var(--jv-dim);
+    font: 500 10px/1.2 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    list-style: none;
+  }
+  .jv-app .latency summary::-webkit-details-marker { display: none; }
+  .jv-app .latency summary:hover { color: var(--jv-muted); }
+  .jv-app .latency dl {
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 7px 18px;
+    width: max-content;
+    margin: 0 0 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--jv-line);
+    border-radius: 0;
+    background: var(--jv-bg-2);
+    color: var(--jv-muted);
+    font: 400 10.5px/1.4 var(--font-mono);
+    box-shadow: none;
+  }
+  .jv-app .latency dt { color: var(--jv-dim); }
+  .jv-app .latency dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; color: var(--jv-text); }
+
+  .jv-app .voice-note {
+    margin: 10px auto 0;
+    max-width: 660px;
+    font: 400 12.5px/1.5 var(--font-ui);
+    color: var(--jv-muted);
+  }
+  .jv-app .alert {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin: 12px auto 0;
+    padding: 2px 0 2px 12px;
+    border: 0;
+    border-left: 2px solid var(--jv-danger);
+    border-radius: 0;
+    background: none;
+  }
+  .jv-app .alert p {
+    flex: 1;
+    margin: 0;
+    font: 400 12.5px/1.5 var(--font-ui);
+    color: #ffc9c2;
+  }
+  .jv-app .alert button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--jv-dim);
+    font: 500 10px/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .jv-app .alert button:hover { color: var(--jv-text); }
+  .jv-app .composer-alert { margin-top: 10px; margin-bottom: 0; }
+
+  /* ————— drawer ————— */
+  .jv-app .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    border: 0;
+    border-radius: 0;
+    background: rgba(3, 4, 5, 0.62);
+    backdrop-filter: none;
+  }
+  .jv-app .drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    width: min(420px, 100vw);
+    display: flex;
+    flex-direction: column;
+    background: var(--jv-bg);
+    border-left: 1px solid var(--jv-line);
+    border-radius: 0;
+    box-shadow: none;
+    transform: translateX(102%);
+    transition: transform 0.24s ease;
+  }
+  .jv-app .drawer.is-open { transform: none; }
+
+  .jv-app .drawer-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 18px 0;
+    border-bottom: 1px solid var(--jv-line);
+  }
+  .jv-app .tabs {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 16px;
+    min-width: 0;
+  }
+  .jv-app .tabs button {
+    position: relative;
+    display: block;
+    padding: 0 0 10px;
+    border: 0;
+    background: none;
+    color: var(--jv-muted);
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-align: left;
+    text-transform: uppercase;
+    transition: color 0.16s ease;
+  }
+  .jv-app .tabs button:hover { color: var(--jv-accent-2); }
+  .jv-app .tabs button.is-active { color: var(--jv-text); }
+  .jv-app .tabs button.is-active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--jv-accent);
+  }
+  .jv-app .tabs b {
+    display: inline;
+    min-width: 0;
+    height: auto;
+    margin-left: 6px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-accent);
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: 0.04em;
+    vertical-align: 0;
+  }
+  .jv-app .drawer-head > .icon-btn { margin-top: -6px; }
+
+  .jv-app .drawer-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px 18px 26px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--jv-line-strong) transparent;
+  }
+
+  .jv-app .mini-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 14px;
+    padding: 0 0 2px;
+    border: 0;
+    border-bottom: 1px solid var(--jv-line-strong);
+    border-radius: 0;
+    background: none;
+    transition: border-color 0.16s ease;
+  }
+  .jv-app .mini-form:focus-within { border-bottom-color: var(--jv-accent); }
+  .jv-app .mini-form input {
+    flex: 1 1 150px;
+    min-width: 0;
+    padding: 7px 0 8px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-text);
+    font: 400 14px/1.4 var(--font-ui);
+    caret-color: var(--jv-accent);
+    outline: none;
+  }
+  .jv-app .mini-form input:focus { border-bottom-color: var(--jv-accent); }
+  .jv-app .mini-form input::placeholder { color: var(--jv-dim); }
+  .jv-app .mini-form input[type="datetime-local"] {
+    flex: 0 1 172px;
+    margin-top: 0;
+    padding: 7px 0 8px;
+    border: 0;
+    font: 400 11px/1.4 var(--font-mono);
+    letter-spacing: 0.02em;
+    color: var(--jv-muted);
+    color-scheme: dark;
+  }
+  .jv-app .mini-submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-accent);
+    transition: color 0.16s ease, opacity 0.16s ease;
+  }
+  .jv-app .mini-submit:hover:not(:disabled) { color: var(--jv-accent-2); }
+  .jv-app .mini-submit:disabled { color: var(--jv-dim); opacity: 0.7; }
+
+  .jv-app .list { display: grid; gap: 0; }
+  .jv-app .hint {
+    margin: 0;
+    color: var(--jv-muted);
+    font: 400 12.5px/1.65 var(--font-ui);
+  }
+  .jv-app .list .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 12px;
+    padding: 13px 0;
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.055);
+    border-radius: 0;
+    background: none;
+  }
+  .jv-app .list .row:first-child { border-top: 0; }
+  .jv-app .list .row.reminder { grid-template-columns: 16px minmax(0, 1fr) auto; align-items: start; }
+  .jv-app .row p {
+    margin: 0;
+    color: var(--jv-text);
+    font: 400 13.5px/1.55 var(--font-ui);
+    overflow-wrap: anywhere;
+  }
+  .jv-app .row-text p { color: var(--jv-text); }
+  .jv-app .row-text span {
+    display: block;
+    margin-top: 5px;
+    color: var(--jv-dim);
+    font: 500 10px/1.3 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .jv-app .reminder.is-done { opacity: 1; }
+  .jv-app .reminder.is-done p { color: var(--jv-dim); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .jv-app .reminder.is-done .row-text span { color: var(--jv-line-strong); }
+  .jv-app .check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    margin: 2px 0 0;
+    padding: 0;
+    border: 1px solid var(--jv-line-strong);
+    border-radius: 0;
+    background: none;
+    color: var(--jv-ok);
+    transition: border-color 0.16s ease;
+  }
+  .jv-app .check:hover { border-color: var(--jv-ok); }
+  .jv-app .row-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-dim);
+    opacity: 0;
+    transition: color 0.16s ease, opacity 0.16s ease;
+  }
+  .jv-app .row:hover .row-delete,
+  .jv-app .row:focus-within .row-delete,
+  .jv-app .row-delete:focus-visible { opacity: 1; }
+  .jv-app .row-delete:hover { color: var(--jv-danger); }
+
+  .jv-app .context-panel { display: grid; gap: 16px; justify-items: stretch; }
+  .jv-app .context-text {
+    max-height: 58vh;
+    overflow-y: auto;
+    padding: 0 0 0 14px;
+    border: 0;
+    border-left: 1px solid var(--jv-line);
+    border-radius: 0;
+    background: none;
+    color: var(--jv-muted);
+    font: 400 13px/1.72 var(--font-ui);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .jv-app .ghost-btn {
+    justify-self: start;
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-accent);
+    font: 600 10.5px/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .jv-app .ghost-btn:hover { color: var(--jv-accent-2); }
+
+  .jv-app .drawer-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 18px;
+    padding: 12px 18px calc(14px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--jv-line);
+    color: var(--jv-muted);
+    font: 500 10px/1.4 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .jv-app .drawer-foot button {
+    margin-left: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-accent);
+    font: 600 10px/1.4 var(--font-mono);
+    letter-spacing: 0.1em;
+  }
+  .jv-app .drawer-foot button:hover { color: var(--jv-accent-2); }
+
+  /* tarefas: componente externo, vestido pela casca do drawer */
+  .jv-app .task-panel { display: grid; gap: 18px; }
+  .jv-app .task-panel h3 {
+    margin: 0;
+    font: 600 10px/1.3 var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--jv-muted);
+  }
+  .jv-app .task-form {
+    display: grid;
+    gap: 12px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .jv-app .task-form label {
+    display: grid;
+    gap: 2px;
+    font: 500 10px/1.3 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--jv-dim);
+  }
+  .jv-app .task-form :is(input, select, textarea) {
+    width: 100%;
+    padding: 6px 0 7px;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--jv-line-strong);
+    border-radius: 0;
+    color: var(--jv-text);
+    font: 400 13.5px/1.45 var(--font-ui);
+    outline: none;
+  }
+  .jv-app .task-form :is(input, select, textarea):focus { border-bottom-color: var(--jv-accent); }
+  .jv-app .task-form textarea { resize: vertical; }
+  .jv-app .task-panel button {
+    justify-self: start;
+    padding: 2px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--jv-accent);
+    font: 600 10.5px/1.2 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .jv-app .task-panel button:hover:not(:disabled) { color: var(--jv-accent-2); background: none; }
+  .jv-app .task-panel button:disabled { opacity: 0.5; }
+  .jv-app .task-item {
+    display: grid;
+    gap: 6px;
+    padding: 14px 0;
+    border: 0;
+    border-top: 1px solid var(--jv-line);
+    border-radius: 0;
+    background: none;
+  }
+  .jv-app .task-item strong { font: 500 13px/1.4 var(--font-ui); color: var(--jv-text); }
+  .jv-app .task-item p {
+    margin: 0;
+    font: 400 11px/1.55 var(--font-mono);
+    color: var(--jv-muted);
+  }
+  .jv-app .task-item details { border: 0; }
+  .jv-app .task-item summary {
+    cursor: pointer;
+    font: 500 10px/1.4 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--jv-dim);
+  }
+  .jv-app .task-item pre {
+    margin: 0;
+    padding: 8px 0 0 12px;
+    border: 0;
+    border-left: 1px solid var(--jv-line);
+    background: none;
+    color: var(--jv-muted);
+    font: 400 10.5px/1.55 var(--font-mono);
+  }
+  .jv-app .task-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  /* ————— harness ————— */
+  .jv-app.shell--hud .hero.is-compact { padding: 10px 0 2px; }
+  .jv-app.shell--hud .hero.is-compact .hologram-stage { inline-size: 72px; }
+  .jv-app.shell--hud .hero.is-compact .hologram-stage::before { inset: -32%; }
+  .jv-app.shell--hud .msg { margin-top: 24px; }
+  .jv-app.shell--hud .msg-body { font-size: 14.5px; }
+  .jv-app.shell--hud .stage { padding-bottom: 14px; }
+  .jv-app.shell--hud .chat-empty h1 { font-size: 26px; }
+  .jv-app.shell--hud .composer-status { margin-top: 10px; }
+
+  @media (max-width: 720px) {
+    .jv-app.shell { padding: 0 16px; }
+    .jv-app .topbar { gap: 12px; min-height: 54px; }
+    .jv-app .top-status { display: none; }
+    .jv-app .model-picker select { max-width: 132px; padding-right: 14px; }
+    .jv-app .composer-label { display: none; }
+    .jv-app .composer { gap: 8px; }
+    .jv-app .tabs { gap: 10px 12px; }
+  }
+
+  @media (max-width: 420px) {
+    .jv-app .model-picker { display: none; }
+    .jv-app .drawer-head { padding-inline: 14px; }
+    .jv-app .drawer-body { padding-inline: 14px; }
+    .jv-app .drawer-foot { padding-inline: 14px; }
+  }
+
+  @media (max-height: 620px) {
+    .jv-app.shell--hologram .hologram-stage { inline-size: min(66%, 42dvh); }
+    .jv-app .hologram-trace { block-size: 16px; margin-top: 4px; }
+  }
+
+  @media (hover: none) {
+    .jv-app .row-delete { opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .jv-app .hologram-stage::before,
+    .jv-app .mic.is-live,
+    .jv-app .caret { animation: none; }
+  }
+`;

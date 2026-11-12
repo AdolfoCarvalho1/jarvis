@@ -101,6 +101,33 @@ function describe(event: JarvisEvent): { label: string; detail: string } {
   }
 }
 
+/** Rótulo curto da coluna de tipo — o detalhe específico continua vindo de describe(). */
+const KIND_BY_TYPE: Record<string, string> = {
+  "turn/start": "Turno",
+  "turn/end": "Turno",
+  "turn/error": "Erro",
+  "user/message": "Pedido",
+  "assistant/message": "Resposta",
+  "model/request": "Modelo",
+  "tool/call": "Tool",
+  "tool/result": "Tool",
+};
+
+/** O tipo já ocupa a coluna ao lado: evita repetir "Turno…", "Pedido…", "Erro…" no detalhe. */
+const KIND_PREFIX = /^(turno|pedido|modelo|ferramenta|resposta|erro)\b[\s·:—-]*/i;
+
+function kindOf(event: JarvisEvent): string {
+  return KIND_BY_TYPE[event.type] ?? "Evento";
+}
+
+function subjectOf(label: string): string {
+  return label.replace(KIND_PREFIX, "").trim();
+}
+
+/**
+ * accent = eventos principais do turno (início e resposta);
+ * error = falha, no turno ou numa ferramenta.
+ */
 function toneOf(event: JarvisEvent): "neutral" | "accent" | "ok" | "error" {
   if (event.type === "turn/error") return "error";
   if (event.type === "tool/result") {
@@ -167,56 +194,70 @@ export function ActivityPanel() {
     };
   }, [load]);
 
-  const count = loading ? "Carregando…" : total > events.length ? `${events.length} de ${total} eventos` : `${events.length} eventos`;
+  const count = total > events.length ? `${events.length} de ${total} eventos` : `${events.length} eventos`;
+  const showCount = events.length > 0 || (!loading && !error);
 
   return (
-    <section className="activity-panel" aria-label="Atividade do Jarvis" aria-busy={loading}>
-      <div className="activity-head">
-        <p className="hint">{count}</p>
-        <button
-          type="button"
-          className="activity-refresh"
-          onClick={() => void load()}
-          disabled={loading}
-          aria-label="Recarregar atividade"
-        >
-          RECARREGAR
-        </button>
+    <section className="activity-tl" aria-label="Atividade do Jarvis" aria-busy={loading}>
+      <style>{CSS}</style>
+
+      <div className="activity-tl-head">
+        <span className="activity-tl-title">Trilha do turno</span>
+        <span className="activity-tl-tail">
+          {showCount ? <span className="activity-tl-meta">{count}</span> : null}
+          <button
+            type="button"
+            className="activity-tl-refresh"
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Recarregar atividade"
+          >
+            Recarregar
+          </button>
+        </span>
       </div>
 
       {loading ? (
-        <p className="hint" role="status">
-          Carregando eventos…
+        <p className="activity-tl-state" role="status">
+          <span className="activity-tl-dot" aria-hidden="true" />
+          {events.length > 0 ? "Atualizando eventos" : "Carregando eventos"}
         </p>
       ) : null}
 
       {error ? (
-        <div className="activity-error" role="alert">
+        <div className="activity-tl-error" role="alert">
           <p>{error}</p>
           <button type="button" onClick={() => void load()} aria-label="Tentar carregar a atividade de novo">
-            TENTAR DE NOVO
+            Tentar de novo <span aria-hidden="true">→</span>
           </button>
         </div>
       ) : null}
 
       {!loading && !error && events.length === 0 ? (
-        <p className="hint">Nenhum evento registrado ainda. As ações do Jarvis aparecem aqui.</p>
+        <p className="activity-tl-empty">Nenhum evento registrado ainda. As ações do Jarvis aparecem aqui.</p>
       ) : null}
 
       {events.length > 0 ? (
-        <ol className="activity-list" role="list" aria-label="Eventos de atividade, mais recente primeiro">
+        <ol className="activity-tl-list" role="list" aria-label="Eventos de atividade, mais recente primeiro">
           {events.map((event) => {
             const { label, detail } = describe(event);
+            const subject = subjectOf(label);
             const time = timeOf(event.created_at);
             return (
-              <li key={event.id} className="activity-item" data-tone={toneOf(event)}>
-                <time className="activity-time" dateTime={time.iso}>
+              <li key={event.id} className="activity-tl-row" data-tone={toneOf(event)}>
+                <time className="activity-tl-clock" dateTime={time.iso}>
                   {time.text}
                 </time>
-                <div className="activity-main">
-                  <span className="activity-label">{label}</span>
-                  {detail ? <span className="activity-detail">{detail}</span> : null}
-                </div>
+                <span className="activity-tl-kind">{kindOf(event)}</span>
+                <span className="activity-tl-detail">
+                  {subject ? <b>{subject}</b> : null}
+                  {detail ? <span>{subject ? ` · ${detail}` : detail}</span> : null}
+                  {!subject && !detail ? (
+                    <span aria-hidden="true" className="activity-tl-blank">
+                      —
+                    </span>
+                  ) : null}
+                </span>
               </li>
             );
           })}
@@ -225,3 +266,199 @@ export function ActivityPanel() {
     </section>
   );
 }
+
+const CSS = `
+  .activity-tl {
+    --activity-mono: var(--font-geist-mono), ui-monospace, "Cascadia Mono", monospace;
+    --activity-hair: rgba(255, 255, 255, 0.055);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    font-family: var(--activity-mono);
+    color: var(--jv-muted);
+  }
+
+  .activity-tl-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 3px 12px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--jv-line);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .activity-tl-title {
+    color: var(--jv-dim);
+  }
+
+  .activity-tl-tail {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 3px 12px;
+    margin-left: auto;
+    min-width: 0;
+  }
+
+  .activity-tl-meta {
+    color: var(--jv-muted);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .activity-tl-refresh {
+    flex: none;
+    min-height: 24px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--jv-muted);
+    font: 600 10px/1 var(--activity-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: color 0.15s ease;
+  }
+
+  .activity-tl-refresh:hover:not(:disabled) { color: var(--jv-text); }
+  .activity-tl-refresh:disabled { opacity: 0.45; cursor: default; }
+
+  .activity-tl button:focus-visible {
+    outline: 2px solid var(--jv-accent);
+    outline-offset: 4px;
+  }
+
+  .activity-tl-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 12px 0;
+    color: var(--jv-dim);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .activity-tl-dot {
+    flex: none;
+    width: 4px;
+    height: 4px;
+    background: currentColor;
+    animation: activity-tl-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes activity-tl-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  .activity-tl-error {
+    display: grid;
+    justify-items: start;
+    gap: 7px;
+    padding: 12px 0;
+  }
+
+  .activity-tl-error p {
+    margin: 0;
+    color: var(--jv-danger);
+    font-size: 11px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  .activity-tl-error button {
+    min-height: 24px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--jv-danger);
+    font: 600 10px/1 var(--activity-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    transition: color 0.15s ease;
+  }
+
+  .activity-tl-error button:hover { color: var(--jv-text); }
+
+  .activity-tl-empty {
+    margin: 0;
+    padding: 14px 0 4px;
+    max-width: 44ch;
+    color: var(--jv-muted);
+    font-size: 11px;
+    line-height: 1.65;
+  }
+
+  .activity-tl-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .activity-tl-row {
+    display: grid;
+    grid-template-columns: 44px 86px minmax(0, 1fr);
+    column-gap: 10px;
+    align-items: baseline;
+    padding: 9px 0;
+  }
+
+  .activity-tl-row + .activity-tl-row {
+    border-top: 1px solid var(--activity-hair);
+  }
+
+  .activity-tl-clock {
+    color: var(--jv-dim);
+    font-size: 10px;
+    line-height: 1.5;
+    letter-spacing: -0.05em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .activity-tl-kind {
+    color: var(--jv-muted);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.5;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .activity-tl-row[data-tone="accent"] .activity-tl-kind { color: var(--jv-accent); }
+  .activity-tl-row[data-tone="error"] .activity-tl-kind { color: var(--jv-danger); }
+
+  .activity-tl-detail {
+    min-width: 0;
+    color: var(--jv-muted);
+    font-size: 10.5px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  .activity-tl-detail b {
+    color: var(--jv-text);
+    font-weight: 500;
+  }
+
+  .activity-tl-row[data-tone="error"] .activity-tl-detail,
+  .activity-tl-row[data-tone="error"] .activity-tl-detail b {
+    color: var(--jv-danger);
+  }
+
+  .activity-tl-blank {
+    color: var(--jv-dim);
+  }
+`;

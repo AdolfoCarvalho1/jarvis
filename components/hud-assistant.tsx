@@ -117,6 +117,13 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
     window.jarvisHud?.setOpen(next);
   }, []);
 
+  // Ao abrir, a linha de comando já recebe o caret.
+  useEffect(() => {
+    if (!open) return;
+    const node = inputRef.current;
+    if (node && !node.disabled) node.focus();
+  }, [open]);
+
   useEffect(() => {
     voiceRef.current = voiceOn;
   }, [voiceOn]);
@@ -127,6 +134,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
 
   useEffect(() => {
     const stored = window.localStorage.getItem(VOICE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- preferência lida uma vez após hidratar
     if (stored != null) setVoiceOn(stored === "1");
   }, []);
 
@@ -391,6 +399,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
             setError(String(event.message ?? "erro no modelo"));
             setTone("red");
             setApproval(null);
+            showBubble();
             break;
           }
         }
@@ -434,6 +443,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         if (!controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "falha ao contatar o modelo");
           setTone("red");
+          showBubble();
         }
       } finally {
         busyRef.current = false;
@@ -441,7 +451,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [applyOpen, enqueueSpeech, feedSpeech, flushSpeech, showBubble, stopSpeech],
+    [enqueueSpeech, feedSpeech, flushSpeech, showBubble, stopSpeech],
   );
 
   const decideApproval = useCallback(
@@ -462,11 +472,12 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         setApproval(null);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "falha ao responder à confirmação");
+        showBubble();
       } finally {
         setApprovalSending(false);
       }
     },
-    [approval, approvalSending],
+    [approval, approvalSending, showBubble],
   );
 
   const stopMicEnergy = useCallback(() => {
@@ -515,6 +526,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
       setRecording(true);
     } catch {
       setError("Microfone indisponível.");
+      showBubble();
       stopMicEnergy();
     }
 
@@ -529,6 +541,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
       chunksRef.current = [];
       if (blob.size < 2400) {
         setError("Não ouvi nada.");
+        showBubble();
         return;
       }
 
@@ -545,11 +558,12 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         await send(data.text.trim());
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "falha ao transcrever");
+        showBubble();
       } finally {
         setTranscribing(false);
       }
     }
-  }, [applyOpen, pumpEnergy, recording, send, stopMicEnergy, stopSpeech, transcribing]);
+  }, [pumpEnergy, recording, send, showBubble, stopMicEnergy, stopSpeech, transcribing]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
@@ -615,13 +629,15 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
     void send(text);
   }
 
-  const bubbleText = reply || (busy ? "" : error);
+  const bubbleText = error || reply;
+  const bubbleShown = bubbleVisible && (Boolean(bubbleText) || busy);
 
   return (
     <div
       className={`hud ${open ? "is-open" : ""}`}
       data-hud="assistant"
       data-state={orbState}
+      data-pending={approval ? "true" : undefined}
     >
       <div className="hud-tools">
         <button
@@ -672,12 +688,14 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
           }
         }}
       >
-        <div className="hud-halo" />
-        <Orb state={orbState} tone={tone} emotion={emotion} energyRef={energyRef} size={258} />
+        <div className="hud-halo" aria-hidden="true" />
+        <div className="hud-orb">
+          <Orb state={orbState} tone={tone} emotion={emotion} energyRef={energyRef} size={258} />
+        </div>
         <span className="hud-status">{status}</span>
       </div>
 
-      <div className={`hud-bubble ${bubbleVisible && bubbleText ? "is-visible" : ""}`}>
+      <div className={`hud-bubble ${bubbleShown ? "is-visible" : ""} ${error && !reply ? "is-error" : ""}`}>
         {question && bubbleText ? <p className="hud-bubble-q">{question}</p> : null}
         {bubbleText ? (
           <div className="hud-bubble-a">
@@ -708,14 +726,14 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
 
       {approval ? (
         <div className="hud-approval" role="alertdialog" aria-label="Confirmação necessária" data-approval={approval.approvalId}>
-          <p>
+          <p className="hud-approval-kicker">Confirmação necessária</p>
+          <p className="hud-approval-line">
             <strong>{approval.label}</strong>
-            <span>Aguardando sua confirmação</span>
           </p>
-          {approval.detail ? <pre>{approval.detail.slice(0, 200)}</pre> : null}
+          {approval.detail ? <pre title={approval.detail.slice(0, 200)}>{approval.detail.slice(0, 200)}</pre> : null}
           <div className="hud-approval-actions">
-            <button type="button" onClick={() => void decideApproval(false)} disabled={approvalSending}>Recusar</button>
-            <button type="button" onClick={() => void decideApproval(true)} disabled={approvalSending}>Autorizar</button>
+            <button type="button" onClick={() => void decideApproval(true)} disabled={approvalSending}>AUTORIZAR</button>
+            <button type="button" onClick={() => void decideApproval(false)} disabled={approvalSending}>RECUSAR</button>
           </div>
         </div>
       ) : null}
@@ -725,7 +743,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
           ref={inputRef}
           value={input}
           rows={1}
-          placeholder={recording ? "Gravando…" : "Escreva ou fale"}
+          placeholder={recording ? "Gravando…" : "Pergunte ou fale"}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -742,7 +760,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
           title={recording ? "Enviar áudio" : "Falar"}
           aria-label={recording ? "Enviar áudio" : "Falar"}
         >
-          <MicIcon size={15} />
+          <MicIcon size={16} />
         </button>
         <button
           type="button"
@@ -752,7 +770,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
           title="Enviar"
           aria-label="Enviar"
         >
-          <SendIcon size={15} />
+          <SendIcon size={16} />
         </button>
       </div>
 
@@ -765,107 +783,187 @@ const CSS = `
   html, body { background: transparent !important; overflow: hidden !important; margin: 0 !important; }
   .hud {
     position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: flex-start; padding: 10px 10px 10px; gap: 6px; overflow: hidden;
-    font-family: var(--font-geist-sans), system-ui, sans-serif; background: transparent;
+    justify-content: center; gap: 6px; padding: 8px 12px 12px; overflow: hidden;
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    color: var(--jv-text); background: transparent;
+  }
+  .hud.is-open { justify-content: flex-start; }
+  /* véu neutro único: dá contraste sobre qualquer desktop, sem virar caixa */
+  .hud::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(78% 56% at 50% 34%, rgba(7,8,9,.7) 0%, rgba(7,8,9,.44) 52%, rgba(7,8,9,0) 78%),
+      linear-gradient(180deg, rgba(7,8,9,0) 32%, rgba(7,8,9,.55) 58%, rgba(7,8,9,.9) 100%);
   }
   .hud-tools {
-    position: absolute; top: 6px; right: 8px; display: flex; gap: 5px; z-index: 3;
-    opacity: 0; transition: opacity .18s ease;
+    position: absolute; top: 6px; right: 8px; z-index: 6;
+    display: flex; align-items: center; gap: 2px;
+    opacity: 0; pointer-events: none; transition: opacity .16s ease;
   }
-  .hud.is-open .hud-tools, .hud-tools:focus-within { opacity: 1; }
+  /* em repouso nada aparece, mas o canto continua arrastando a janela */
+  .hud-tools .hud-drag { pointer-events: auto; }
+  .hud.is-open .hud-tools, .hud-tools:focus-within { opacity: 1; pointer-events: auto; }
+  .hud.is-open .hud-tools {
+    position: static; align-self: stretch; justify-content: flex-end;
+    flex: 0 0 auto; height: 22px;
+  }
   .hud-tools button {
-    width: 24px; height: 24px; display: grid; place-items: center; cursor: pointer;
-    border-radius: 8px; border: 1px solid rgba(72,178,214,.22);
-    background: rgba(6,20,29,.72); color: #8ec4d8; backdrop-filter: blur(6px);
+    width: 22px; height: 22px; display: grid; place-items: center;
+    border: 0; border-radius: 0; background: none; color: var(--jv-muted);
+    cursor: pointer; transition: color .15s ease; -webkit-app-region: no-drag;
   }
-  .hud-tools button:hover { background: rgba(18,54,72,.9); color: #d3f1fd; }
-  .hud-tools button.is-on { color: #6fe0ff; border-color: rgba(96,216,255,.4); }
+  .hud-tools button:hover { color: var(--jv-accent-2); }
+  .hud-tools button.is-on { color: var(--jv-accent); }
+  .hud-tools button:focus-visible { outline: 1px solid var(--jv-accent); outline-offset: 1px; }
   .hud-tools button.hud-drag { -webkit-app-region: drag; cursor: grab; }
   .hud-tools button.hud-drag:active { cursor: grabbing; }
-  .hud-core { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; cursor: pointer; outline: none; border-radius: 50%; -webkit-app-region: no-drag; }
-  .hud-core:focus-visible { box-shadow: 0 0 0 1px rgba(96,216,255,.45); }
-  .hud-halo {
-    position: absolute; inset: -20px -14px -14px; z-index: 0; pointer-events: none;
-    background: radial-gradient(closest-side, rgba(8,30,44,.8) 0%, rgba(4,12,18,.35) 64%, rgba(0,0,0,0) 100%);
-  }
-  .hud-core canvas { position: relative; z-index: 1; display: block; }
-  .hud-status {
-    position: relative; z-index: 1; margin-top: -4px;
-    font: 9.5px/1 var(--font-geist-mono), ui-monospace, monospace; letter-spacing: .22em; color: #8fc6da;
-  }
-  .hud-bubble {
-    width: 100%; max-height: 92px; overflow-y: auto; opacity: 0; transform: translateY(-5px);
-    transition: opacity .18s ease, transform .18s ease; pointer-events: none;
-    padding: 8px 10px; border-radius: 12px;
-    background: rgba(5,17,24,.86); border: 1px solid rgba(72,178,214,.16);
-    backdrop-filter: blur(8px); box-shadow: 0 10px 26px rgba(0,0,0,.35);
-  }
-  .hud-bubble.is-visible { opacity: 1; transform: none; pointer-events: auto; }
-  .hud-bubble::-webkit-scrollbar { width: 3px; }
-  .hud-bubble::-webkit-scrollbar-thumb { background: rgba(90,180,210,.3); border-radius: 3px; }
-  .hud-bubble-q {
-    margin: 0 0 5px; font: 600 8px/1.3 var(--font-geist-mono), ui-monospace, monospace;
-    letter-spacing: .18em; text-transform: uppercase; color: #5f93a8;
-  }
-  .hud-bubble-a { font-size: 11.5px; line-height: 1.4; color: #e4f6ff; }
-  .hud-bubble-a p { margin: 0 0 5px; }
-  .hud-bubble-a p:last-child { margin: 0; }
-  .hud-bubble-a strong { color: #c2f0ff; }
-  .hud-bubble-a a { color: #6fe0ff; }
-  .hud-bubble-a ul, .hud-bubble-a ol { margin: 3px 0 5px; padding-left: 16px; }
-  .hud-bubble-a code {
-    font: 10px/1.4 var(--font-geist-mono), ui-monospace, monospace;
-    background: rgba(40,120,150,.22); padding: 1px 4px; border-radius: 4px;
-  }
-  .hud-dots { display: inline-flex; gap: 4px; padding: 2px 0; }
-  .hud-dots i { width: 4px; height: 4px; border-radius: 50%; background: #5fb8d6; animation: hud-dot 1.1s infinite ease-in-out; }
-  .hud-dots i:nth-child(2) { animation-delay: .15s; }
-  .hud-dots i:nth-child(3) { animation-delay: .3s; }
-  @keyframes hud-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
-  .hud-approval {
-    position: absolute; left: 10px; right: 10px; bottom: 56px; z-index: 9;
-    padding: 9px 10px; border-radius: 12px; border: 1px solid rgba(255,190,110,.55);
-    background: rgba(22,15,6,.97); box-shadow: 0 12px 30px rgba(0,0,0,.55);
-    color: #ffe6c2; font: 12px/1.4 var(--font-geist-sans), system-ui, sans-serif;
+  .hud-core {
+    position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center;
+    gap: 2px; cursor: pointer; outline: none; border-radius: 50%;
     -webkit-app-region: no-drag;
   }
-  .hud-approval p { display: flex; flex-direction: column; gap: 1px; margin: 0 0 6px; }
-  .hud-approval p span { color: #c9a97c; font-size: 10.5px; letter-spacing: .04em; }
+  .hud[data-pending] .hud-bubble { opacity: 0; }
+  .hud-core:focus-visible { outline: 1px solid var(--jv-accent); outline-offset: 8px; }
+  .hud-halo {
+    position: absolute; left: 50%; top: 46%; width: 318px; height: 318px;
+    transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; z-index: 0;
+    background: radial-gradient(circle, rgba(255,138,30,.12) 0%, rgba(255,120,20,.045) 44%, rgba(255,120,20,0) 68%);
+    animation: hud-halo 9s ease-in-out infinite;
+  }
+  .hud-orb {
+    position: relative; z-index: 1; display: grid; place-items: center;
+    animation: hud-breathe 8s ease-in-out infinite; will-change: transform;
+  }
+  .hud-orb .orb { animation: hud-turn 240s linear infinite; will-change: transform; }
+  .hud-status {
+    position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px;
+    font: 500 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .2em; text-transform: uppercase; color: var(--jv-muted);
+    white-space: nowrap; user-select: none;
+  }
+  .hud-status::before {
+    content: ""; width: 4px; height: 4px; flex: 0 0 auto;
+    transform: rotate(45deg); background: currentColor; opacity: .85;
+  }
+  .hud[data-state="listening"] .hud-status,
+  .hud[data-state="thinking"] .hud-status,
+  .hud[data-state="speaking"] .hud-status { color: var(--jv-accent-2); }
+  .hud-core canvas { position: relative; z-index: 1; display: block; }
+  .hud-bubble {
+    position: relative; z-index: 1;
+    width: calc(100% + 24px); max-height: 0; opacity: 0; overflow: hidden; pointer-events: none;
+    margin: 0 -12px; padding: 0 14px;
+    transition: opacity .18s ease, max-height .22s ease, padding .22s ease;
+  }
+  .hud-bubble.is-visible {
+    max-height: 90px; opacity: 1; pointer-events: auto; overflow-y: auto;
+    padding: 10px 14px 12px;
+  }
+  .hud-bubble::-webkit-scrollbar { width: 3px; }
+  .hud-bubble::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 3px; }
+  .hud-bubble-q {
+    margin: 0 0 5px; font: 400 11px/1.4 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .02em; color: var(--jv-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hud-bubble-a { font-size: 14px; line-height: 1.55; color: var(--jv-text); word-break: break-word; }
+  .hud-bubble-a p { margin: 0 0 6px; }
+  .hud-bubble-a p:last-child { margin: 0; }
+  .hud-bubble-a strong { color: var(--jv-text); font-weight: 600; }
+  .hud-bubble-a em { color: var(--jv-muted); }
+  .hud-bubble-a a {
+    color: var(--jv-accent-2); text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-thickness: 1px;
+  }
+  .hud-bubble-a ul, .hud-bubble-a ol { margin: 4px 0 6px; padding-left: 18px; }
+  .hud-bubble-a li { margin: 2px 0; }
+  .hud-bubble-a code {
+    font: 12px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+    color: var(--jv-accent-2); background: rgba(255,255,255,.06); padding: 0 3px;
+  }
+  .hud-bubble-a pre {
+    margin: 4px 0 6px; padding: 2px 0 2px 10px; border-left: 1px solid var(--jv-line);
+    background: none; overflow-x: auto;
+  }
+  .hud-bubble-a pre code { background: none; padding: 0; color: var(--jv-muted); }
+  .hud-bubble.is-error .hud-bubble-a { color: var(--jv-danger); }
+  .hud-dots { display: inline-flex; gap: 4px; padding: 3px 0 1px; }
+  .hud-dots i { width: 3px; height: 3px; border-radius: 50%; background: var(--jv-accent); opacity: .35; animation: hud-dot 1.2s infinite ease-in-out; }
+  .hud-dots i:nth-child(2) { animation-delay: .15s; }
+  .hud-dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes hud-dot { 0%, 80%, 100% { opacity: .2; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+  .hud-approval {
+    position: absolute; left: 0; right: 0; bottom: 57px; z-index: 9;
+    padding: 12px 14px 10px;
+    background: linear-gradient(180deg, rgba(7,8,9,0) 0, rgba(7,8,9,.55) 18%, rgba(7,8,9,.8) 100%);
+    color: var(--jv-text); -webkit-app-region: no-drag;
+  }
+  .hud-approval-kicker {
+    margin: 0 0 5px; font: 600 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .18em; text-transform: uppercase; color: var(--jv-accent);
+  }
+  .hud-approval-line {
+    margin: 0 0 3px; font: 500 14px/1.3 var(--font-geist-sans), system-ui, sans-serif;
+    color: var(--jv-text);
+  }
+  .hud-approval-line strong { font-weight: 600; }
   .hud-approval pre {
-    margin: 0 0 7px; padding: 5px 6px; max-height: 52px; overflow: hidden;
-    border-radius: 7px; background: rgba(0,0,0,.35); color: #e8d6b8;
-    font: 10.5px/1.35 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
+    margin: 0 0 8px; padding: 0; max-height: 16px; overflow: hidden;
+    border: 0; background: none; color: var(--jv-muted);
+    font: 400 11px/1.45 var(--font-geist-mono), ui-monospace, monospace;
+    white-space: nowrap; text-overflow: ellipsis;
   }
-  .hud-approval-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .hud-approval-actions { display: flex; align-items: center; gap: 22px; }
   .hud-approval-actions button {
-    border: 1px solid rgba(255,200,140,.35); border-radius: 8px; padding: 5px 10px;
-    background: rgba(70,45,20,.55); color: #ffe6c2; font: 11px/1 inherit; cursor: pointer;
+    min-height: 24px; padding: 0; border: 0; background: none; cursor: pointer;
+    color: var(--jv-accent); font: 600 11px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .08em; transition: color .15s ease;
   }
-  .hud-approval-actions button:last-child { background: #8a4f16; border-color: #c98636; color: #fff4e2; }
-  .hud-approval-actions button:disabled { opacity: .6; cursor: wait; }
+  .hud-approval-actions button:hover { color: var(--jv-accent-2); }
+  .hud-approval-actions button:last-child { color: var(--jv-muted); }
+  .hud-approval-actions button:last-child:hover { color: var(--jv-text); }
+  .hud-approval-actions button:disabled { opacity: .5; cursor: wait; }
+  .hud-approval-actions button:focus-visible { outline: 1px solid var(--jv-accent); outline-offset: 3px; }
   .hud-field {
-    width: 100%; display: flex; align-items: flex-end; gap: 6px; padding: 5px 5px 5px 12px;
-    border-radius: 14px; border: 1px solid rgba(72,178,214,.24); background: rgba(4,15,22,.9);
-    backdrop-filter: blur(8px); box-shadow: 0 10px 26px rgba(0,0,0,.4);
-    opacity: 0; transform: translateY(-5px); pointer-events: none;
-    transition: opacity .18s ease, transform .18s ease, border-color .15s, box-shadow .15s;
+    position: relative; z-index: 1;
+    width: 100%; display: flex; align-items: center; gap: 2px;
+    max-height: 0; overflow: hidden; padding: 0; border: 0; border-bottom: 1px solid transparent;
+    background: none; opacity: 0; pointer-events: none;
+    transition: opacity .16s ease, max-height .2s ease, padding .2s ease, border-color .16s ease;
   }
-  .hud.is-open .hud-field { opacity: 1; transform: none; pointer-events: auto; }
-  .hud-field:focus-within { border-color: rgba(96,216,255,.5); box-shadow: 0 0 0 3px rgba(40,140,180,.12), 0 10px 26px rgba(0,0,0,.4); }
-  .hud-field.is-recording { border-color: rgba(255,110,96,.6); box-shadow: 0 0 0 3px rgba(180,60,50,.14); }
+  .hud.is-open .hud-field {
+    max-height: 40px; padding: 2px 0 4px; border-bottom-color: var(--jv-line);
+    opacity: 1; pointer-events: auto;
+  }
+  .hud-field:focus-within { border-bottom-color: var(--jv-accent); }
+  .hud-field.is-recording { border-bottom-color: var(--jv-danger); }
   .hud-field textarea {
-    flex: 1; resize: none; height: 30px; max-height: 30px; border: 0; outline: none; background: transparent;
-    color: #e6f6ff; font: 12.5px/1.5 var(--font-geist-sans), system-ui, sans-serif; padding: 4px 0;
+    flex: 1; min-width: 0; height: 30px; max-height: 30px; resize: none; padding: 5px 2px;
+    border: 0; border-radius: 0; outline: 0; background: transparent;
+    color: var(--jv-text); caret-color: var(--jv-accent);
+    font: 400 15px/1.35 var(--font-geist-sans), system-ui, sans-serif;
   }
-  .hud-field textarea::placeholder { color: #6b96a8; }
+  .hud-field textarea::placeholder { color: var(--jv-muted); }
+  .hud-field textarea:disabled { color: var(--jv-muted); }
   .hud-icon {
-    width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; flex: 0 0 auto;
-    border-radius: 9px; border: 1px solid rgba(72,178,214,.22); background: rgba(14,42,57,.72); color: #a8dcee;
-    transition: background .15s, color .15s, border-color .15s;
+    width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center;
+    border: 0; border-radius: 0; background: none; color: var(--jv-muted);
+    cursor: pointer; transition: color .15s ease;
   }
-  .hud-icon:hover { background: rgba(26,70,92,.95); color: #e2f8ff; border-color: rgba(96,216,255,.45); }
-  .hud-icon.is-rec { background: rgba(180,52,44,.45); color: #ffd9d4; border-color: rgba(255,120,100,.6); animation: hud-pulse 1.1s ease-in-out infinite; }
-  @keyframes hud-pulse { 50% { box-shadow: 0 0 0 5px rgba(255,110,96,.14); } }
-  .hud-send { background: rgba(22,84,110,.85); color: #cdf3ff; }
-  .hud-send:disabled { opacity: .32; cursor: default; }
+  .hud-icon:hover { color: var(--jv-accent-2); }
+  .hud-icon:focus-visible { outline: 1px solid var(--jv-accent); outline-offset: -3px; }
+  .hud-icon.is-rec { color: var(--jv-danger); }
+  .hud-icon.is-rec svg { animation: hud-mic 1.4s ease-in-out infinite; }
+  .hud-send { color: var(--jv-accent); }
+  .hud-send:hover { color: var(--jv-accent-2); }
+  .hud-send:disabled { opacity: .3; cursor: default; color: var(--jv-dim); }
+
+  @keyframes hud-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.014); } }
+  @keyframes hud-turn { to { transform: rotate(360deg); } }
+  @keyframes hud-halo { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+  @keyframes hud-mic { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hud *, .hud *::before, .hud *::after { animation: none !important; transition: none !important; }
+  }
 `;

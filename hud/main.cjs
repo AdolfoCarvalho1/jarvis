@@ -6,7 +6,7 @@ const HUD_URL = "http://127.0.0.1:3300/hud";
 const APP_URL = "http://127.0.0.1:3300/";
 const OPEN = { width: 380, height: 462 };
 const REST = { width: 330, height: 312 };
-const HARNESS = { width: 1040, height: 760 };
+const HARNESS = { width: 1180, height: 820 };
 
 let win = null;
 let tray = null;
@@ -265,14 +265,17 @@ if (!hasLock) {
 } else {
   app.on("second-instance", () => showWindow());
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     app.setAppUserModelId("com.adolfo.jarvis.hud");
-    // Service worker antigo do PWA (jarvis-v1) serviu o shell do app dentro do HUD.
-    // Limpa o registro nesta sessão do Electron; o /hud atual não registra mais SW.
-    session.defaultSession
-      .clearStorageData({ storages: ["serviceworkers", "cachestorage"] })
-      .catch((error) => log("sw-limpo-erro", error.message))
-      .then(() => log("sw-limpo"));
+    // O PWA antigo e o cache HTTP podem servir chunks de um build anterior no HUD.
+    // Limpa os dois antes de abrir para a UI nova aparecer de verdade.
+    await Promise.all([
+      session.defaultSession.clearCache().catch((error) => log("cache-limpo-erro", error.message)),
+      session.defaultSession
+        .clearStorageData({ storages: ["serviceworkers", "cachestorage"] })
+        .catch((error) => log("sw-limpo-erro", error.message)),
+    ]);
+    log("cache-limpo");
     createWindow();
     createTray();
     globalShortcut.register("Control+Alt+J", toggleWindow);

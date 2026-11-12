@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-type Tab = "navegador" | "tela" | "arquivos" | "skills" | "mcp";
+type Tab = "navegador" | "tela" | "arquivos" | "skills" | "mcp" | "atividade";
 
 interface BrowserState {
   url: string;
@@ -33,13 +33,29 @@ interface McpServer {
   tools: Array<{ name: string; exposed: string }>;
 }
 
+interface HarnessEvent {
+  id: string;
+  type: string;
+  payload?: unknown;
+  created_at?: string | null;
+}
+
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "navegador", label: "navegador" },
-  { id: "tela", label: "tela" },
-  { id: "arquivos", label: "arquivos" },
-  { id: "skills", label: "skills" },
-  { id: "mcp", label: "mcp" },
+  { id: "navegador", label: "NAVEGADOR" },
+  { id: "tela", label: "TELA" },
+  { id: "arquivos", label: "ARQUIVOS" },
+  { id: "skills", label: "SKILLS" },
+  { id: "mcp", label: "MCP" },
+  { id: "atividade", label: "ATIVIDADE" },
 ];
+
+const eventClock = new Intl.DateTimeFormat("pt-BR", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+  timeZone: "America/Sao_Paulo",
+});
 
 async function post<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -52,31 +68,150 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return data;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function clip(value: string, max = 120): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function stamp(event: HarnessEvent): number {
+  const value = event.created_at ? Date.parse(event.created_at) : Number.NaN;
+  return Number.isNaN(value) ? 0 : value;
+}
+
+function describeEvent(event: HarnessEvent): { kind: string; detail: string } {
+  const payload = asRecord(event.payload);
+  switch (event.type) {
+    case "turn/start":
+      return { kind: "turno", detail: asText(payload.model) || "iniciado" };
+    case "user/message": {
+      const chars = asText(payload.chars);
+      return { kind: "pedido", detail: chars ? `${chars} chars` : "" };
+    }
+    case "model/request": {
+      const round = asText(payload.round);
+      const tokens = asText(payload.tokens);
+      const usage = tokens
+        ? `${tokens} tokens`
+        : [asText(payload.promptTokens ?? payload.prompt_tokens), asText(payload.completionTokens ?? payload.completion_tokens)]
+            .filter(Boolean)
+            .join(" + ");
+      return { kind: "modelo", detail: [round ? `${round}ª rodada` : "", usage].filter(Boolean).join(" · ") };
+    }
+    case "tool/call": {
+      const name = clip(asText(payload.name) || "ferramenta", 40);
+      const args = payload.args ?? payload.arguments ?? payload.input;
+      let detail = "";
+      if (typeof args === "string") detail = args;
+      else if (args) {
+        try {
+          detail = JSON.stringify(args);
+        } catch {
+          detail = "";
+        }
+      }
+      return { kind: "tool", detail: clip([name, detail].filter(Boolean).join(" · "), 120) };
+    }
+    case "tool/result": {
+      const name = clip(asText(payload.name) || "ferramenta", 40);
+      const status = asText(payload.status);
+      const ms = asText(payload.ms);
+      return { kind: "tool", detail: clip([name, status, ms ? `${ms} ms` : ""].filter(Boolean).join(" · "), 120) };
+    }
+    case "assistant/message": {
+      const chars = asText(payload.chars);
+      return { kind: "resposta", detail: chars ? `${chars} chars` : "" };
+    }
+    case "turn/end": {
+      const ms = asText(payload.ms);
+      return { kind: "turno", detail: ms ? `${ms} ms` : "concluído" };
+    }
+    case "turn/error":
+      return { kind: "erro", detail: clip(asText(payload.message) || "falha no turno", 120) };
+    default:
+      return { kind: clip(event.type || "evento", 32), detail: "" };
+  }
+}
+
+function failedEvent(event: HarnessEvent): boolean {
+  if (event.type === "turn/error") return true;
+  if (event.type !== "tool/result") return false;
+  return /(error|erro|fail|falh)/i.test(asText(asRecord(event.payload).status));
+}
+
 export function HarnessPanel() {
   const [tab, setTab] = useState<Tab>("navegador");
   const [collapsed, setCollapsed] = useState(false);
 
+  const moveTab = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const index = TABS.findIndex((item) => item.id === tab);
+      let next = index;
+      if (event.key === "ArrowRight") next = (index + 1) % TABS.length;
+      else if (event.key === "ArrowLeft") next = (index - 1 + TABS.length) % TABS.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = TABS.length - 1;
+      else return;
+      event.preventDefault();
+      const target = TABS[next];
+      setTab(target.id);
+      document.getElementById(`hp-tab-${target.id}`)?.focus();
+    },
+    [tab],
+  );
+
   return (
     <aside className={`hpanel ${collapsed ? "is-collapsed" : ""}`} data-panel="harness">
-      <div className="hpanel-tabs">
-        <button type="button" className="hpanel-collapse" onClick={() => setCollapsed((value) => !value)} title={collapsed ? "Abrir painel" : "Recolher painel"}>
-          {collapsed ? "‹" : "›"}
-        </button>
-        {!collapsed &&
-          TABS.map((item) => (
-            <button key={item.id} type="button" className={tab === item.id ? "is-on" : ""} onClick={() => setTab(item.id)}>
-              {item.label}
-            </button>
-          ))}
-      </div>
+      <button
+        type="button"
+        className="hp-collapse"
+        onClick={() => setCollapsed((value) => !value)}
+        aria-expanded={!collapsed}
+        aria-controls="hp-pane"
+        aria-label={collapsed ? "Abrir painel" : "Recolher painel"}
+        title={collapsed ? "Abrir painel" : "Recolher painel"}
+      >
+        {collapsed ? "‹" : "›"}
+      </button>
       {!collapsed && (
-        <div className="hpanel-body">
-          {tab === "navegador" && <BrowserTab />}
-          {tab === "tela" && <ScreenTab />}
-          {tab === "arquivos" && <FilesTab />}
-          {tab === "skills" && <SkillsTab />}
-          {tab === "mcp" && <McpTab />}
-        </div>
+        <>
+          <div className="hp-tabs" role="tablist" aria-label="Ferramentas do harness" onKeyDown={moveTab}>
+            {TABS.map((item) => (
+              <button
+                key={item.id}
+                id={`hp-tab-${item.id}`}
+                type="button"
+                role="tab"
+                aria-selected={tab === item.id}
+                aria-controls="hp-pane"
+                tabIndex={tab === item.id ? 0 : -1}
+                className={tab === item.id ? "is-on" : ""}
+                onClick={() => setTab(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div className="hp-body">
+            <div className="hp-pane" id="hp-pane" role="tabpanel" aria-labelledby={`hp-tab-${tab}`}>
+              {tab === "navegador" && <BrowserTab />}
+              {tab === "tela" && <ScreenTab />}
+              {tab === "arquivos" && <FilesTab />}
+              {tab === "skills" && <SkillsTab />}
+              {tab === "mcp" && <McpTab />}
+              {tab === "atividade" && <ActivityTab />}
+            </div>
+          </div>
+        </>
       )}
       <style>{CSS}</style>
     </aside>
@@ -116,30 +251,79 @@ function BrowserTab() {
     [url],
   );
 
+  const scheme = /^http:\/\//i.test(url) ? "http://" : "https://";
+  const address = url.replace(/^https?:\/\//i, "");
+  const hasShot = Boolean(browser.shotAt && browser.title && browser.url);
+  const shotTime = hasShot ? new Date(browser.shotAt).toLocaleTimeString("pt-BR") : "sem captura";
+
   return (
     <div className="hp-tab">
-      <div className="hp-row">
-        <input value={url} onChange={(event) => setUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && act("navegar")} placeholder="https://…" spellCheck={false} />
-        <button type="button" onClick={() => act("navegar")} disabled={busy !== ""}>
-          {busy === "navegar" ? "…" : "ir"}
-        </button>
+      <div className="hp-urlblock">
+        <div className="hp-url">
+          <span className="hp-proto" aria-hidden="true">
+            {scheme}
+          </span>
+          <input
+            value={address}
+            onChange={(event) => {
+              const value = event.target.value;
+              setUrl(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `${scheme}${value}`);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void act("navegar");
+            }}
+            placeholder="example.com"
+            aria-label="Endereço"
+            spellCheck={false}
+          />
+          <button type="button" className="hp-act" onClick={() => void act("navegar")} disabled={busy !== ""}>
+            {busy === "navegar" ? "…" : "IR"}
+          </button>
+        </div>
+        <div className="hp-actions">
+          <button type="button" className="hp-act hp-act-muted" onClick={() => void act("voltar")} disabled={busy !== ""}>
+            voltar
+          </button>
+          <button type="button" className="hp-act hp-act-muted" onClick={() => void act("atualizar")} disabled={busy !== ""}>
+            capturar
+          </button>
+        </div>
       </div>
-      <div className="hp-row hp-row-actions">
-        <button type="button" onClick={() => act("voltar")} disabled={busy !== ""}>voltar</button>
-        <button type="button" onClick={() => act("atualizar")} disabled={busy !== ""}>capturar</button>
+
+      {error || browser.error ? (
+        <p className="hp-error" role="alert">
+          {error || browser.error}
+        </p>
+      ) : null}
+
+      <div className="hp-head">
+        <span>viewport</span>
+        <b>{shotTime}</b>
       </div>
-      <p className="hp-meta">{browser.title || "sem página"}{browser.url ? ` · ${browser.url}` : ""}</p>
-      {error ? <p className="hp-error">{error}</p> : null}
-      <div className="hp-shot">
-        {browser.shotAt ? (
+      <div className="hp-frame hp-frame-view">
+        {hasShot ? (
           <a href={`/api/browser?shot=1&t=${browser.shotAt}`} target="_blank" rel="noreferrer" title="Abrir a captura em tamanho real">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`/api/browser?shot=1&t=${browser.shotAt}`} alt="captura da página" />
           </a>
         ) : (
-          <span>sem captura ainda</span>
+          <span className="hp-frame-empty">sem captura ainda</span>
         )}
       </div>
+
+      <div className="hp-head">
+        <span>página</span>
+      </div>
+      <ul className="hp-rows">
+        <li className="hp-row">
+          <span className="hp-row-key">título</span>
+          <span className="hp-row-val">{browser.title ? <b>{browser.title}</b> : "—"}</span>
+        </li>
+        <li className="hp-row">
+          <span className="hp-row-key">endereço</span>
+          <span className="hp-row-val">{browser.url || "—"}</span>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -186,35 +370,75 @@ function ScreenTab() {
 
   return (
     <div className="hp-tab">
-      <div className="hp-row">
-        <button type="button" onClick={() => void capture()} disabled={busy !== ""}>
-          {busy === "capturar" ? "capturando…" : "capturar tela"}
-        </button>
-        <span className="hp-meta">
-          {status || (state.at ? new Date(state.at).toLocaleTimeString("pt-BR") : "sem captura")}
+      <div className="hp-head">
+        <span>tela do pc</span>
+        <span className="hp-head-right">
+          <b>{status || (state.at ? new Date(state.at).toLocaleTimeString("pt-BR") : "sem captura")}</b>
+          <button type="button" className="hp-act" onClick={() => void capture()} disabled={busy !== ""}>
+            {busy === "capturar" ? "capturando…" : "capturar"}
+          </button>
         </span>
       </div>
 
-      <div className="hp-shot hp-screen">
+      {state.error ? (
+        <p className="hp-error" role="alert">
+          {state.error}
+        </p>
+      ) : null}
+
+      <div className="hp-frame hp-frame-img">
         {state.at ? (
           <a href={`/api/screen?shot=1&t=${state.at}`} target="_blank" rel="noreferrer" title="Abrir em tamanho real">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`/api/screen?shot=1&t=${state.at}`} alt="captura da tela do PC" />
           </a>
         ) : (
-          <span>sem captura ainda</span>
+          <span className="hp-frame-empty">sem captura ainda</span>
         )}
       </div>
 
-      <div className="hp-controls">
-        <button type="button" onClick={() => void control("volume-down")} disabled={busy !== ""}>vol −</button>
-        <button type="button" onClick={() => void control("mute")} disabled={busy !== ""}>mudo</button>
-        <button type="button" onClick={() => void control("volume-up")} disabled={busy !== ""}>vol +</button>
-        <button type="button" onClick={() => void control("anterior")} disabled={busy !== ""}>⏮</button>
-        <button type="button" onClick={() => void control("play-pause")} disabled={busy !== ""}>⏯</button>
-        <button type="button" onClick={() => void control("proxima")} disabled={busy !== ""}>⏭</button>
-        <button type="button" className="is-danger" onClick={() => void control("bloquear")} disabled={busy !== ""}>bloquear</button>
+      <div className="hp-head">
+        <span>controles</span>
+        <b>whitelist</b>
       </div>
+      <ul className="hp-rows">
+        <li className="hp-row">
+          <span className="hp-row-key">volume</span>
+          <span className="hp-row-acts">
+            <button type="button" onClick={() => void control("volume-down")} disabled={busy !== ""} aria-label="Abaixar volume">
+              vol −
+            </button>
+            <button type="button" onClick={() => void control("mute")} disabled={busy !== ""} aria-label="Silenciar">
+              mudo
+            </button>
+            <button type="button" onClick={() => void control("volume-up")} disabled={busy !== ""} aria-label="Aumentar volume">
+              vol +
+            </button>
+          </span>
+        </li>
+        <li className="hp-row">
+          <span className="hp-row-key">mídia</span>
+          <span className="hp-row-acts">
+            <button type="button" className="hp-glyph" onClick={() => void control("anterior")} disabled={busy !== ""} aria-label="Faixa anterior">
+              ⏮
+            </button>
+            <button type="button" className="hp-glyph" onClick={() => void control("play-pause")} disabled={busy !== ""} aria-label="Tocar ou pausar">
+              ⏯
+            </button>
+            <button type="button" className="hp-glyph" onClick={() => void control("proxima")} disabled={busy !== ""} aria-label="Próxima faixa">
+              ⏭
+            </button>
+          </span>
+        </li>
+        <li className="hp-row">
+          <span className="hp-row-key">sistema</span>
+          <span className="hp-row-acts">
+            <button type="button" className="hp-danger" onClick={() => void control("bloquear")} disabled={busy !== ""}>
+              bloquear
+            </button>
+          </span>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -225,16 +449,26 @@ function FilesTab() {
   const [content, setContent] = useState("");
   const [hash, setHash] = useState("");
   const [status, setStatus] = useState("");
+  const [treeError, setTreeError] = useState("");
   const [busy, setBusy] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadTree = useCallback(async () => {
-    const data = (await fetch("/api/files").then((response) => response.json())) as { arquivos?: FileEntry[] };
-    setFiles(data.arquivos ?? []);
+    try {
+      const data = (await fetch("/api/files").then((response) => response.json())) as { arquivos?: FileEntry[]; error?: string };
+      if (data.error) throw new Error(data.error);
+      setFiles(data.arquivos ?? []);
+      setTreeError("");
+    } catch (failure) {
+      setTreeError(failure instanceof Error ? failure.message : "falha ao listar arquivos");
+    }
   }, []);
 
   useEffect(() => {
-    void loadTree().catch(() => undefined);
+    const timer = window.setTimeout(() => {
+      void loadTree().catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadTree]);
 
   const open = useCallback(async (caminho: string) => {
@@ -275,25 +509,59 @@ function FilesTab() {
   }, [content, hash, open, selected]);
 
   return (
-    <div className="hp-tab hp-split">
-      <ul className="hp-list">
+    <div className="hp-tab">
+      <div className="hp-head">
+        <span>workspace</span>
+        <b>{files.length} arquivos</b>
+      </div>
+
+      {treeError ? (
+        <p className="hp-error" role="alert">
+          {treeError}
+        </p>
+      ) : null}
+
+      <ul className="hp-list hp-files">
         {files.map((file) => (
           <li key={file.caminho}>
-            <button type="button" className={selected === file.caminho ? "is-on" : ""} onClick={() => void open(file.caminho)}>
+            <button
+              type="button"
+              className={`hp-file ${selected === file.caminho ? "is-on" : ""}`}
+              onClick={() => void open(file.caminho)}
+              aria-pressed={selected === file.caminho}
+              title={file.caminho}
+            >
               <span>{file.caminho}</span>
               <em>{Math.round(file.tamanho / 1024)}k</em>
             </button>
           </li>
         ))}
+        {!files.length && !treeError ? <li className="hp-empty">nenhum arquivo</li> : null}
       </ul>
-      <div className="hp-editor">
-        <div className="hp-row">
-          <strong>{selected || "escolha um arquivo"}</strong>
-          <button type="button" onClick={() => void save()} disabled={!selected || busy}>salvar</button>
-        </div>
-        <textarea ref={areaRef} value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} disabled={!selected} />
-        {status ? <p className="hp-meta">{status}</p> : null}
+
+      <div className="hp-toolbar">
+        <span className="hp-sel" title={selected || undefined}>
+          {selected || "escolha um arquivo"}
+        </span>
+        <button type="button" className="hp-act" onClick={() => void save()} disabled={!selected || busy}>
+          salvar
+        </button>
       </div>
+      <textarea
+        ref={areaRef}
+        className="hp-textarea"
+        value={content}
+        onChange={(event) => setContent(event.target.value)}
+        spellCheck={false}
+        disabled={!selected}
+        aria-label="Conteúdo do arquivo"
+        placeholder="selecione um arquivo para editar"
+      />
+      {status ? (
+        <p className="hp-meta" role="status">
+          {status}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -322,23 +590,43 @@ function SkillsTab() {
   }, []);
 
   return (
-    <div className="hp-tab hp-split">
-      <ul className="hp-list">
+    <div className="hp-tab">
+      <div className="hp-head">
+        <span>skills instaladas</span>
+        <b>{skills.length}</b>
+      </div>
+
+      <ul className="hp-list hp-skills">
         {skills.map((skill) => (
           <li key={skill.slug}>
-            <button type="button" className={name === skill.slug ? "is-on" : ""} onClick={() => void open(skill.slug)}>
-              <span>{skill.slug}{skill.invalid ? " ⚠" : ""}</span>
-              <em>{Math.round(skill.bytes / 1024)}k</em>
+            <button
+              type="button"
+              className={`hp-skill ${name === skill.slug ? "is-on" : ""}`}
+              onClick={() => void open(skill.slug)}
+              aria-pressed={name === skill.slug}
+              title={skill.invalid || skill.description}
+            >
+              <span className="hp-skill-top">
+                <b>
+                  {skill.slug}
+                  {skill.invalid ? " ⚠" : ""}
+                </b>
+                <em>{Math.round(skill.bytes / 1024)}k</em>
+              </span>
+              <span className="hp-skill-desc">{skill.description}</span>
             </button>
-            <small>{skill.description}</small>
           </li>
         ))}
         {!skills.length ? <li className="hp-empty">nenhuma skill</li> : null}
       </ul>
-      <div className="hp-editor">
-        <strong>{name || "escolha uma skill"}</strong>
-        <pre>{body}</pre>
+
+      <div className="hp-toolbar">
+        <span className="hp-sel" title={name || undefined}>
+          {name || "escolha uma skill"}
+        </span>
+        <span className="hp-meta">prévia</span>
       </div>
+      <pre className="hp-pre">{body}</pre>
     </div>
   );
 }
@@ -350,13 +638,20 @@ function McpTab() {
   const [envText, setEnvText] = useState("");
 
   const load = useCallback(async () => {
-    const data = (await fetch("/api/mcp").then((response) => response.json())) as { servers?: McpServer[] };
-    setServers(data.servers ?? []);
-    setStatus("");
+    try {
+      const data = (await fetch("/api/mcp").then((response) => response.json())) as { servers?: McpServer[] };
+      setServers(data.servers ?? []);
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "falha ao carregar mcp");
+    }
   }, []);
 
   useEffect(() => {
-    void load().catch(() => undefined);
+    const timer = window.setTimeout(() => {
+      void load().catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const reload = useCallback(async () => {
@@ -402,27 +697,47 @@ function McpTab() {
 
   return (
     <div className="hp-tab">
-      <div className="hp-row">
-        <button type="button" onClick={() => void reload()}>recarregar</button>
-        <span className="hp-meta">{status}</span>
+      <div className="hp-head">
+        <span>servidores</span>
+        <span className="hp-head-right">
+          <b>{status || `${servers.length} configurados`}</b>
+          <button type="button" className="hp-act" onClick={() => void reload()}>
+            recarregar
+          </button>
+        </span>
       </div>
-      <ul className="hp-servers">
+
+      <ul className="hp-list hp-servers">
         {servers.map((server) => (
-          <li key={server.name}>
-            <div>
+          <li key={server.name} className="hp-server">
+            <div className="hp-server-top">
               <strong>{server.name}</strong>
-              <em className={server.state === "ready" ? "ok" : "bad"}>{server.enabled ? server.state : "off"}</em>
+              <em className={server.state === "ready" && server.enabled ? "hp-state-ok" : "hp-state-bad"}>
+                {server.enabled ? server.state : "off"}
+              </em>
             </div>
-            <small>{server.tools.length} ferramentas · aprovação {server.approval ? "sim" : "não"}</small>
-            {server.error ? <p className="hp-error">{server.error}</p> : null}
-            <div className="hp-mcp-actions">
+            <p className="hp-server-meta">
+              {server.tools.length} ferramentas · aprovação {server.approval ? "sim" : "não"}
+            </p>
+            {server.error ? (
+              <p className="hp-error" role="alert">
+                {server.error}
+              </p>
+            ) : null}
+            <div className="hp-server-actions">
               <button type="button" onClick={() => void patch(server.name, { enabled: !server.enabled })}>
                 {server.enabled ? "desligar" : "ligar"}
               </button>
               <button type="button" onClick={() => void patch(server.name, { approval: !server.approval })}>
                 aprovação {server.approval ? "on" : "off"}
               </button>
-              <button type="button" onClick={() => { setEnvFor(envFor === server.name ? "" : server.name); setEnvText(""); }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setEnvFor(envFor === server.name ? "" : server.name);
+                  setEnvText("");
+                }}
+              >
                 env
               </button>
             </div>
@@ -433,99 +748,388 @@ function McpTab() {
                   onChange={(event) => setEnvText(event.target.value)}
                   placeholder={'{"CHAVE":"valor"} — substitui todo o env'}
                   spellCheck={false}
+                  aria-label={`Variáveis de ambiente de ${server.name}`}
                 />
-                <button type="button" onClick={() => void saveEnv(server.name)}>salvar env</button>
+                <button type="button" className="hp-act" onClick={() => void saveEnv(server.name)}>
+                  salvar env
+                </button>
               </div>
             ) : null}
           </li>
         ))}
+        {!servers.length && !status ? <li className="hp-empty">nenhum servidor</li> : null}
       </ul>
+    </div>
+  );
+}
+
+function ActivityTab() {
+  const [events, setEvents] = useState<HarnessEvent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const ticketRef = useRef(0);
+
+  const load = useCallback(async () => {
+    const ticket = ++ticketRef.current;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/events?limit=60", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(response.status === 404 ? "rota /api/events indisponível" : `falha ao carregar atividade (${response.status})`);
+      }
+      const data = (await response.json().catch(() => null)) as { events?: HarnessEvent[]; total?: number } | null;
+      if (!data) throw new Error("resposta inválida de /api/events");
+      if (ticket !== ticketRef.current) return;
+      const list = Array.isArray(data.events) ? data.events.filter((event) => event && typeof event.type === "string") : [];
+      const sorted = [...list].sort((a, b) => stamp(b) - stamp(a));
+      setEvents(sorted);
+      setTotal(typeof data.total === "number" ? data.total : sorted.length);
+    } catch (failure) {
+      if (ticket !== ticketRef.current) return;
+      setError(failure instanceof Error ? failure.message : "falha ao carregar atividade");
+    } finally {
+      if (ticket === ticketRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      ticketRef.current += 1;
+    };
+  }, [load]);
+
+  const count = loading ? "carregando…" : total > events.length ? `${events.length} de ${total}` : `${events.length} eventos`;
+
+  return (
+    <div className="hp-tab" aria-busy={loading}>
+      <div className="hp-head">
+        <span>atividade</span>
+        <span className="hp-head-right">
+          <b>{count}</b>
+          <button type="button" className="hp-act" onClick={() => void load()} disabled={loading}>
+            atualizar
+          </button>
+        </span>
+      </div>
+
+      {error ? (
+        <p className="hp-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {!loading && !error && events.length === 0 ? <p className="hp-empty">nenhum evento ainda</p> : null}
+
+      {events.length > 0 ? (
+        <ol className="hp-events" aria-label="Eventos de atividade, mais recente primeiro">
+          {events.map((event) => {
+            const { kind, detail } = describeEvent(event);
+            const at = event.created_at ? new Date(event.created_at) : null;
+            const valid = at && !Number.isNaN(at.getTime()) ? at : null;
+            return (
+              <li key={event.id} className={`hp-event ${failedEvent(event) ? "is-bad" : ""}`}>
+                <time dateTime={event.created_at ?? undefined}>{valid ? eventClock.format(valid) : "--:--:--"}</time>
+                <span className="hp-event-kind">{kind}</span>
+                <span className="hp-event-detail">{detail || "—"}</span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
     </div>
   );
 }
 
 const CSS = `
   .hpanel {
-    width: 380px; flex: 0 0 380px; display: flex; flex-direction: column; min-height: 0;
-    background: rgba(5,14,20,.97); border-left: 1px solid rgba(72,178,214,.18);
-    font-family: var(--font-geist-sans), system-ui, sans-serif; color: #d8eef7;
+    width: 380px; flex: 0 0 380px; min-height: 0;
+    display: flex; flex-direction: column;
+    padding: 0 20px 16px 24px;
+    position: relative; overflow: hidden;
+    background: transparent;
+    color: var(--jv-text);
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
   }
-  .hpanel.is-collapsed { width: 30px; flex-basis: 30px; }
-  .hpanel-tabs { display: flex; gap: 4px; align-items: center; padding: 6px 8px; border-bottom: 1px solid rgba(72,178,214,.14); }
-  .hpanel-tabs button {
-    cursor: pointer; border: 1px solid rgba(72,178,214,.2); background: rgba(12,36,48,.7); color: #9dc4d4;
-    border-radius: 7px; padding: 3px 8px; font: 10px/1.4 var(--font-geist-mono), ui-monospace, monospace; letter-spacing: .08em;
+  .hpanel.is-collapsed { width: 30px; flex-basis: 30px; padding: 0; }
+
+  .hp-collapse {
+    position: absolute; top: 0; right: 4px; z-index: 2;
+    width: 20px; height: 20px; display: grid; place-items: center;
+    border: 0; background: none; padding: 0; margin: 0;
+    color: var(--jv-dim); cursor: pointer;
+    font: 400 13px/1 var(--font-geist-mono), ui-monospace, monospace;
   }
-  .hpanel-tabs button.is-on { color: #eafaff; border-color: rgba(96,216,255,.55); background: rgba(22,70,92,.9); }
-  .hpanel-collapse { width: 22px; padding: 3px 0 !important; }
-  .hpanel-body { flex: 1; min-height: 0; display: flex; }
-  .hp-tab { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow: hidden; }
-  .hp-row { display: flex; gap: 6px; align-items: center; }
-  .hp-row input, .hp-editor textarea {
-    flex: 1; min-width: 0; border-radius: 8px; border: 1px solid rgba(72,178,214,.22);
-    background: rgba(3,12,18,.9); color: #e4f6ff; padding: 6px 8px; font: 11px/1.4 var(--font-geist-mono), ui-monospace, monospace;
+  .hp-collapse:hover { color: var(--jv-text); }
+  .hpanel.is-collapsed .hp-collapse { top: 10px; right: 5px; }
+
+  .hp-tabs {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 12px; row-gap: 6px;
+    padding: 22px 0 0;
   }
-  .hp-row button {
-    cursor: pointer; border-radius: 8px; padding: 5px 10px; border: 1px solid rgba(72,178,214,.25);
-    background: rgba(18,54,72,.9); color: #cdeffb; font-size: 11px;
+  .hp-tabs button {
+    position: relative; border: 0; background: none; margin: 0;
+    padding: 0 0 7px; text-align: left; cursor: pointer;
+    color: var(--jv-dim);
+    font: 600 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .1em; text-transform: uppercase;
+    transition: color .15s ease;
   }
-  .hp-row button:disabled { opacity: .45; cursor: default; }
-  .hp-row-actions button { flex: 1; }
-  .hp-meta { margin: 0; font: 10px/1.4 var(--font-geist-mono), ui-monospace, monospace; color: #7ea6b6; word-break: break-all; }
-  .hp-error { margin: 0; font-size: 10.5px; color: #ff9d8d; }
-  .hp-shot { flex: 1; min-height: 120px; border-radius: 10px; border: 1px solid rgba(72,178,214,.18); background: #040a0f; display: grid; place-items: center; overflow: auto; }
-  .hp-shot img { max-width: 100%; display: block; }
-  .hp-shot span { font-size: 10.5px; color: #5f8b9c; }
-  .hp-screen { align-content: start; justify-items: stretch; }
-  .hp-screen a { display: block; width: 100%; }
-  .hp-screen img { max-width: 100%; width: 100%; display: block; image-rendering: auto; }
-  .hp-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-  .hp-controls button {
-    cursor: pointer; border-radius: 7px; padding: 6px 4px; font-size: 10px;
-    border: 1px solid rgba(72,178,214,.22); background: rgba(12,36,48,.8); color: #cdeffb;
+  .hp-tabs button:hover { color: var(--jv-muted); }
+  .hp-tabs button.is-on { color: var(--jv-accent); }
+  .hp-tabs button.is-on::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+    height: 1px; background: var(--jv-accent);
   }
-  .hp-controls button:hover { background: rgba(22,70,92,.9); color: #eafaff; }
-  .hp-controls button:disabled { opacity: .45; cursor: default; }
-  .hp-controls button.is-danger { border-color: rgba(255,120,100,.42); color: #ffb6a8; }
-  .hp-split { flex-direction: row; gap: 8px; }
-  .hp-list { flex: 0 0 130px; margin: 0; padding: 0 4px 0 0; list-style: none; overflow-y: auto; }
-  .hp-list li { margin-bottom: 4px; }
-  .hp-list button {
-    width: 100%; display: flex; justify-content: space-between; gap: 4px; cursor: pointer;
-    border: 1px solid transparent; border-radius: 6px; background: transparent; color: #b9dce9;
-    font: 10px/1.3 var(--font-geist-mono), ui-monospace, monospace; padding: 3px 4px; text-align: left;
+
+  .hp-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .hp-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .hp-tab {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+    padding-top: 18px; overflow-y: auto; overflow-x: hidden;
+    scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
   }
-  .hp-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hp-list button em { color: #567f90; font-style: normal; flex: 0 0 auto; }
-  .hp-list button.is-on { background: rgba(22,70,92,.7); border-color: rgba(96,216,255,.35); color: #eafaff; }
-  .hp-list small { display: block; font-size: 9px; color: #5f8b9c; padding: 0 4px 4px; }
-  .hp-empty { font-size: 10px; color: #5f8b9c; }
-  .hp-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-  .hp-editor strong { font-size: 10.5px; color: #a8d4e2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hp-editor textarea { flex: 1; resize: none; font-size: 10.5px; line-height: 1.5; }
-  .hp-editor pre { flex: 1; overflow: auto; margin: 0; font: 10px/1.5 var(--font-geist-mono), ui-monospace, monospace; color: #c7e6f2; white-space: pre-wrap; }
-  .hp-servers { margin: 0; padding: 0; list-style: none; overflow-y: auto; display: grid; gap: 6px; }
-  .hp-servers li { border: 1px solid rgba(72,178,214,.16); border-radius: 8px; padding: 7px 8px; background: rgba(8,24,32,.6); }
-  .hp-servers div { display: flex; justify-content: space-between; align-items: center; }
-  .hp-servers strong { font-size: 11px; }
-  .hp-servers em { font: 9px/1 var(--font-geist-mono), ui-monospace, monospace; font-style: normal; letter-spacing: .1em; }
-  .hp-servers em.ok { color: #6fe0a8; }
-  .hp-servers em.bad { color: #ff8f7d; }
-  .hp-servers small { font-size: 9.5px; color: #6d97a8; }
-  .hp-mcp-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
-  .hp-mcp-actions button {
-    flex: 1 1 auto; cursor: pointer; border-radius: 6px; padding: 3px 6px; font-size: 9.5px;
-    border: 1px solid rgba(72,178,214,.22); background: rgba(12,36,48,.8); color: #b9dce9;
+
+  .hp-urlblock { display: grid; gap: 7px; }
+  .hp-url {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 0 0 10px; border-bottom: 1px solid var(--jv-line);
   }
-  .hp-mcp-actions button:hover { background: rgba(22,70,92,.9); color: #eafaff; }
-  .hp-env { display: grid; gap: 4px; margin-top: 6px; }
+  .hp-proto {
+    flex: 0 0 auto; color: var(--jv-dim);
+    font: 500 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .04em;
+  }
+  .hp-url input {
+    flex: 1; min-width: 0; border: 0; outline: 0; background: none;
+    padding: 2px 0; color: var(--jv-muted);
+    font: 400 11px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+    caret-color: var(--jv-accent);
+  }
+  .hp-url input:focus { color: var(--jv-text); }
+  .hp-url input::placeholder { color: var(--jv-dim); }
+
+  .hp-actions { display: flex; align-items: center; gap: 18px; }
+
+  .hp-act {
+    display: inline-flex; align-items: center; min-height: 22px;
+    border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
+    color: var(--jv-accent);
+    font: 600 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .1em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .hp-act:hover { color: var(--jv-accent-2); }
+  .hp-act:disabled { color: var(--jv-dim); cursor: default; }
+  .hp-act-muted { color: var(--jv-muted); font-weight: 500; }
+  .hp-act-muted:hover { color: var(--jv-text); }
+
+  .hp-meta {
+    margin: 0; color: var(--jv-dim);
+    font: 400 10px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+    overflow-wrap: anywhere;
+  }
+  .hp-error {
+    margin: 0; color: var(--jv-danger);
+    font: 400 10.5px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+    overflow-wrap: anywhere;
+  }
+  .hp-empty {
+    margin: 0; padding: 10px 0; color: var(--jv-dim);
+    font: 400 10px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+  }
+
+  .hp-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding-bottom: 7px; border-bottom: 1px solid var(--jv-line);
+    color: var(--jv-dim); text-transform: uppercase;
+    font: 600 10px/1.3 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .14em;
+  }
+  .hp-head b {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--jv-muted); font-weight: 500; letter-spacing: .06em;
+  }
+  .hp-head-right { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+
+  .hp-rows { margin: 0; padding: 0; list-style: none; }
+  .hp-row {
+    display: grid; grid-template-columns: 64px minmax(0, 1fr);
+    gap: 12px; align-items: baseline; padding: 9px 0;
+  }
+  .hp-row + .hp-row { border-top: 1px solid var(--jv-line); }
+  .hp-row-key {
+    color: var(--jv-dim); letter-spacing: .04em;
+    font: 500 10px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-row-val {
+    color: var(--jv-muted); overflow-wrap: anywhere;
+    font: 400 10.5px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-row-val b { color: var(--jv-text); font-weight: 500; }
+  .hp-row-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0 18px; }
+  .hp-row-acts button {
+    border: 0; background: none; padding: 0; margin: 0; min-height: 24px; cursor: pointer;
+    color: var(--jv-muted);
+    font: 500 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .06em; text-transform: uppercase;
+  }
+  .hp-row-acts button:hover { color: var(--jv-text); }
+  .hp-row-acts button:disabled { color: var(--jv-dim); cursor: default; }
+  .hp-row-acts .hp-glyph { font-size: 12px; letter-spacing: 0; }
+  .hp-row-acts button.hp-danger { color: var(--jv-danger); }
+  .hp-row-acts button.hp-danger:hover { opacity: .8; }
+
+  .hp-list {
+    margin: 0; padding: 0; list-style: none;
+    overflow-y: auto; min-height: 0;
+    scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
+  }
+  .hp-list > li + li { border-top: 1px solid var(--jv-line); }
+
+  .hp-files { flex: 0 1 auto; max-height: 40%; }
+  .hp-file {
+    width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    border: 0; background: none; padding: 8px 0; margin: 0; cursor: pointer; text-align: left;
+    color: var(--jv-muted);
+    font: 400 11px/1.35 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hp-file em { flex: 0 0 auto; font-style: normal; color: var(--jv-dim); font-size: 10px; }
+  .hp-file:hover { color: var(--jv-text); }
+  .hp-file.is-on { color: var(--jv-accent); }
+
+  .hp-toolbar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .hp-sel {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--jv-muted);
+    font: 500 10.5px/1.45 var(--font-geist-mono), ui-monospace, monospace;
+  }
+
+  .hp-textarea {
+    flex: 1; min-height: 110px; width: 100%; resize: none;
+    border: 0; border-top: 1px solid var(--jv-line); background: transparent;
+    padding: 10px 0; margin: 0; outline: 0;
+    color: var(--jv-text); caret-color: var(--jv-accent);
+    font: 400 14px/1.55 var(--font-geist-mono), ui-monospace, monospace;
+    scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
+  }
+  .hp-textarea:focus { border-top-color: var(--jv-line-strong); }
+  .hp-textarea:disabled { color: var(--jv-dim); }
+  .hp-textarea::placeholder { color: var(--jv-dim); }
+
+  .hp-frame {
+    border: 1px solid var(--jv-line); background: #0a0c0e;
+    display: grid; place-items: center; overflow: auto;
+    scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
+  }
+  .hp-frame-view { width: 100%; aspect-ratio: 16 / 10; overflow: auto; display: block; }
+  .hp-frame-view .hp-frame-empty { display: grid; place-items: center; height: 100%; }
+  .hp-frame-img { width: 100%; aspect-ratio: 16 / 10; overflow: hidden; }
+  .hp-frame a { display: block; width: 100%; }
+  .hp-frame img { display: block; width: 100%; height: auto; }
+  .hp-frame-empty {
+    color: var(--jv-dim);
+    font: 400 10px/1.4 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .06em;
+  }
+
+  .hp-skills { flex: 0 1 auto; max-height: 46%; }
+  .hp-skill {
+    width: 100%; display: grid; gap: 4px; border: 0; background: none;
+    padding: 9px 0; margin: 0; cursor: pointer; text-align: left;
+  }
+  .hp-skill-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+  .hp-skill-top b {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--jv-muted); font: 500 11px/1.3 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-skill-top em { flex: 0 0 auto; font-style: normal; color: var(--jv-dim); font-size: 10px; }
+  .hp-skill-desc {
+    color: var(--jv-dim); font-size: 10px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .hp-skill:hover b { color: var(--jv-text); }
+  .hp-skill.is-on b { color: var(--jv-accent); }
+
+  .hp-pre {
+    flex: 1; min-height: 100px; margin: 0; overflow: auto; padding: 10px 0 0;
+    color: var(--jv-muted); white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 400 14px/1.6 var(--font-geist-mono), ui-monospace, monospace;
+    scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
+  }
+
+  .hp-servers { flex: 1; }
+  .hp-server { display: grid; gap: 5px; padding: 11px 0; }
+  .hp-server-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .hp-server-top strong {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--jv-text); font: 500 11px/1.3 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-server-top em {
+    flex: 0 0 auto; font-style: normal; font-weight: 600; font-size: 10px;
+    letter-spacing: .1em; text-transform: uppercase;
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-state-ok { color: var(--jv-ok); }
+  .hp-state-bad { color: var(--jv-danger); }
+  .hp-server-meta {
+    margin: 0; color: var(--jv-dim);
+    font: 400 10px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-server-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; }
+  .hp-server-actions button {
+    border: 0; background: none; padding: 0; margin: 0; min-height: 22px; cursor: pointer;
+    color: var(--jv-muted);
+    font: 500 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .04em;
+  }
+  .hp-server-actions button:hover { color: var(--jv-text); }
+
+  .hp-env { display: grid; gap: 6px; margin-top: 2px; }
   .hp-env textarea {
-    min-height: 52px; resize: vertical; border-radius: 6px; padding: 5px;
-    border: 1px solid rgba(72,178,214,.22); background: rgba(3,12,18,.9); color: #dff2fa;
-    font: 9.5px/1.4 var(--font-geist-mono), ui-monospace, monospace;
+    min-height: 58px; resize: vertical; width: 100%;
+    border: 0; border-top: 1px solid var(--jv-line); background: transparent;
+    padding: 8px 0; margin: 0; outline: 0;
+    color: var(--jv-text); caret-color: var(--jv-accent);
+    font: 400 14px/1.5 var(--font-geist-mono), ui-monospace, monospace;
   }
-  .hp-env button {
-    justify-self: end; cursor: pointer; border-radius: 6px; padding: 3px 8px; font-size: 9.5px;
-    border: 1px solid rgba(72,178,214,.25); background: rgba(18,54,72,.9); color: #cdeffb;
+  .hp-env textarea:focus { border-top-color: var(--jv-line-strong); }
+  .hp-env textarea::placeholder { color: var(--jv-dim); }
+  .hp-env .hp-act { justify-self: start; }
+
+  .hp-events {
+    flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
+  }
+  .hp-event {
+    display: grid; grid-template-columns: 54px 70px minmax(0, 1fr); gap: 10px;
+    align-items: baseline; padding: 8px 0;
+    font: 400 10px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-event + .hp-event { border-top: 1px solid var(--jv-line); }
+  .hp-event time { color: var(--jv-dim); }
+  .hp-event-kind {
+    color: var(--jv-muted); font-weight: 600; font-size: 10px;
+    letter-spacing: .04em; text-transform: uppercase;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hp-event-detail { color: var(--jv-muted); overflow-wrap: anywhere; }
+  .hp-event.is-bad .hp-event-kind { color: var(--jv-danger); }
+
+  .hpanel button:focus-visible,
+  .hpanel input:focus-visible,
+  .hpanel textarea:focus-visible {
+    outline: 1px solid var(--jv-accent); outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hp-tabs button { transition: none; }
   }
 `;
