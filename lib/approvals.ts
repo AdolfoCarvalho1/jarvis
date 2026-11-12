@@ -15,7 +15,7 @@ export function askApproval(signal: AbortSignal) {
       resolve(approved);
     };
     const cancel = () => finish(false);
-    const timer = setTimeout(cancel, 45_000);
+    const timer = setTimeout(cancel, 120_000);
     pending.set(id, finish);
     if (signal.aborted) cancel();
     else signal.addEventListener("abort", cancel, { once: true });

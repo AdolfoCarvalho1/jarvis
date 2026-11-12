@@ -50,6 +50,8 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
   const [reply, setReply] = useState("");
   const [question, setQuestion] = useState("");
   const [bubbleVisible, setBubbleVisible] = useState(false);
+  const [approval, setApproval] = useState<{ operationId: string; approvalId: string; label: string; detail: string } | null>(null);
+  const [approvalSending, setApprovalSending] = useState(false);
 
   const energyRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -367,6 +369,22 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
             }
             break;
           }
+          case "tool": {
+            const operationId = String(event.id ?? "");
+            if (event.status === "approval" && event.approvalId) {
+              setApproval({
+                operationId,
+                approvalId: String(event.approvalId),
+                label: String(event.label ?? "Operação"),
+                detail: String(event.detail ?? ""),
+              });
+              applyOpen(true);
+              setBubbleVisible(true);
+            } else {
+              setApproval((current) => (current && current.operationId === operationId ? null : current));
+            }
+            break;
+          }
           case "done": {
             setTone(sentimentOf(acc) === "negative" ? "red" : "blue");
             flushSpeech();
@@ -376,6 +394,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
           case "error": {
             setError(String(event.message ?? "erro no modelo"));
             setTone("red");
+            setApproval(null);
             break;
           }
         }
@@ -427,6 +446,31 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
       }
     },
     [applyOpen, enqueueSpeech, feedSpeech, flushSpeech, showBubble, stopSpeech],
+  );
+
+  const decideApproval = useCallback(
+    async (approved: boolean) => {
+      if (!approval || approvalSending) return;
+      setApprovalSending(true);
+      setError("");
+      try {
+        const response = await fetch("/api/approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: approval.approvalId, approved }),
+        });
+        if (!response.ok) {
+          const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(detail?.error ?? `HTTP ${response.status}`);
+        }
+        setApproval(null);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "falha ao responder à confirmação");
+      } finally {
+        setApprovalSending(false);
+      }
+    },
+    [approval, approvalSending],
   );
 
   const stopMicEnergy = useCallback(() => {
@@ -662,6 +706,20 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         {busy && !reply && !error ? <span className="hud-dots"><i /><i /><i /></span> : null}
       </div>
 
+      {approval ? (
+        <div className="hud-approval" role="alertdialog" aria-label="Confirmação necessária" data-approval={approval.approvalId}>
+          <p>
+            <strong>{approval.label}</strong>
+            <span>Aguardando sua confirmação</span>
+          </p>
+          {approval.detail ? <pre>{approval.detail.slice(0, 200)}</pre> : null}
+          <div className="hud-approval-actions">
+            <button type="button" onClick={() => void decideApproval(false)} disabled={approvalSending}>Recusar</button>
+            <button type="button" onClick={() => void decideApproval(true)} disabled={approvalSending}>Autorizar</button>
+          </div>
+        </div>
+      ) : null}
+
       <div className={`hud-field ${recording ? "is-recording" : ""}`}>
         <textarea
           ref={inputRef}
@@ -772,6 +830,27 @@ const CSS = `
   .hud-dots i:nth-child(2) { animation-delay: .15s; }
   .hud-dots i:nth-child(3) { animation-delay: .3s; }
   @keyframes hud-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+  .hud-approval {
+    position: absolute; left: 10px; right: 10px; bottom: 56px; z-index: 9;
+    padding: 9px 10px; border-radius: 12px; border: 1px solid rgba(255,190,110,.55);
+    background: rgba(22,15,6,.97); box-shadow: 0 12px 30px rgba(0,0,0,.55);
+    color: #ffe6c2; font: 12px/1.4 var(--font-geist-sans), system-ui, sans-serif;
+    -webkit-app-region: no-drag;
+  }
+  .hud-approval p { display: flex; flex-direction: column; gap: 1px; margin: 0 0 6px; }
+  .hud-approval p span { color: #c9a97c; font-size: 10.5px; letter-spacing: .04em; }
+  .hud-approval pre {
+    margin: 0 0 7px; padding: 5px 6px; max-height: 52px; overflow: hidden;
+    border-radius: 7px; background: rgba(0,0,0,.35); color: #e8d6b8;
+    font: 10.5px/1.35 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  .hud-approval-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .hud-approval-actions button {
+    border: 1px solid rgba(255,200,140,.35); border-radius: 8px; padding: 5px 10px;
+    background: rgba(70,45,20,.55); color: #ffe6c2; font: 11px/1 inherit; cursor: pointer;
+  }
+  .hud-approval-actions button:last-child { background: #8a4f16; border-color: #c98636; color: #fff4e2; }
+  .hud-approval-actions button:disabled { opacity: .6; cursor: wait; }
   .hud-field {
     width: 100%; display: flex; align-items: flex-end; gap: 6px; padding: 5px 5px 5px 12px;
     border-radius: 14px; border: 1px solid rgba(72,178,214,.24); background: rgba(4,15,22,.9);
