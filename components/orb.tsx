@@ -4,16 +4,78 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 
 export type OrbState = "idle" | "thinking" | "listening" | "speaking";
 export type OrbTone = "blue" | "red";
+export type OrbEmotion = "calm" | "curious" | "focused" | "excited" | "angry" | "alert";
 
 interface OrbProps {
   state?: OrbState;
   tone?: OrbTone;
+  emotion?: OrbEmotion;
   energyRef?: MutableRefObject<number>;
   size?: number;
   className?: string;
 }
 
 type Color = [number, number, number];
+
+/**
+ * Cada emoção é um perfil de movimento e cor. Os valores são alvo de uma
+ * transição suave — trocar de emoção não corta a animação, ela migra.
+ */
+interface EmotionProfile {
+  primary: Color;
+  secondary: Color;
+  accent: Color;
+  spin: number;
+  energy: number;
+  pulse: number;
+  jitter: number;
+  spark: number;
+  aperture: number;
+  tilt: number;
+  glow: number;
+  sweep: number;
+  dim: number;
+  scale: number;
+}
+
+const EMOTIONS: Record<OrbEmotion, EmotionProfile> = {
+  // calmo: grande, apagado, respiração lenta
+  calm: {
+    primary: [46, 215, 255], secondary: [194, 251, 255], accent: [255, 180, 77],
+    spin: 1, energy: 0, pulse: 0.35, jitter: 0, spark: 0.3, aperture: 1,
+    tilt: 0, glow: 1.16, sweep: 0.78, dim: 0.48, scale: 1.07,
+  },
+  // curioso: inclina o disco e vira turquesa, como quem olha de lado
+  curious: {
+    primary: [96, 255, 220], secondary: [214, 255, 248], accent: [255, 198, 112],
+    spin: 1.45, energy: 0.14, pulse: 0.8, jitter: 0.18, spark: 0.62, aperture: 1.12,
+    tilt: 0.38, glow: 1.02, sweep: 1.2, dim: 1, scale: 1.01,
+  },
+  // concentrado: menor, azul profundo, varredura estreita e rápida
+  focused: {
+    primary: [62, 150, 255], secondary: [150, 206, 255], accent: [255, 150, 60],
+    spin: 2.3, energy: 0.2, pulse: 0.22, jitter: 0, spark: 0.55, aperture: 0.84,
+    tilt: 0.08, glow: 0.9, sweep: 2.4, dim: 1, scale: 0.86,
+  },
+  // animado: maior, ciano claro, pulsos largos e muita poeira
+  excited: {
+    primary: [120, 250, 255], secondary: [240, 255, 255], accent: [255, 214, 96],
+    spin: 2.9, energy: 0.45, pulse: 1.9, jitter: 0.3, spark: 1, aperture: 1.24,
+    tilt: 0.2, glow: 1.08, sweep: 1.3, dim: 1, scale: 1.08,
+  },
+  // irritado: vermelho, tremor curto, pulsos agressivos
+  angry: {
+    primary: [255, 92, 70], secondary: [255, 194, 166], accent: [255, 132, 58],
+    spin: 3.5, energy: 0.55, pulse: 2.3, jitter: 1, spark: 1.2, aperture: 0.82,
+    tilt: 0.06, glow: 0.9, sweep: 1.6, dim: 1, scale: 0.96,
+  },
+  // alerta: âmbar elétrico, batida forte, piscada
+  alert: {
+    primary: [255, 152, 62], secondary: [255, 232, 184], accent: [255, 86, 58],
+    spin: 3, energy: 0.5, pulse: 2.8, jitter: 0.85, spark: 1.1, aperture: 1.2,
+    tilt: 0.12, glow: 0.94, sweep: 1.8, dim: 1, scale: 0.98,
+  },
+};
 type Point = { x: number; y: number };
 type Ring = { radius: number; depth: number; speed: number; phase: number; ticks: number };
 const TAU = Math.PI * 2;
@@ -43,12 +105,14 @@ function color(rgb: Color, alpha: number) {
 }
 
 /** Live perspective-projected holographic core; no bitmap or 3D dependency. */
-export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, className = "" }: OrbProps) {
+export function Orb({ state = "idle", tone = "blue", emotion, energyRef, size = 240, className = "" }: OrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef(state);
   const toneRef = useRef(tone);
+  const emotionRef = useRef<OrbEmotion>(emotion ?? "calm");
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { toneRef.current = tone; }, [tone]);
+  useEffect(() => { emotionRef.current = emotion ?? "calm"; }, [emotion]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -86,9 +150,9 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
     let visible = true;
     const observer = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; });
     observer.observe(canvas);
-    let frame = 0, last = 0, rotation = 0, energy = 0;
-    let redness = toneRef.current === "red" ? 1 : 0;
+    let frame = 0, last = 0, rotation = 0, energy = 0, clock = 0;
     const cyan: Color = [...CYAN], ice: Color = [...ICE], amber: Color = [...AMBER];
+    const feel = { spin: 1, energy: 0, pulse: 0.35, jitter: 0, spark: 0.3, aperture: 1, tilt: 0, glow: 1, sweep: 1, dim: 1, scale: 1 };
 
     const draw = (now: number) => {
       frameWindow = canvas.ownerDocument.defaultView ?? frameWindow;
@@ -98,37 +162,60 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
       last = now;
       if (!visible || canvas.ownerDocument.hidden) return;
       const currentState = stateRef.current;
+      const profile = toneRef.current === "red" ? EMOTIONS.angry : EMOTIONS[emotionRef.current] ?? EMOTIONS.calm;
+      const mood = 1 - Math.exp(-elapsed * 2.6);
+      clock += elapsed;
+      feel.spin += (profile.spin - feel.spin) * mood;
+      feel.energy += (profile.energy - feel.energy) * mood;
+      feel.pulse += (profile.pulse - feel.pulse) * mood;
+      feel.jitter += (profile.jitter - feel.jitter) * mood;
+      feel.spark += (profile.spark - feel.spark) * mood;
+      feel.aperture += (profile.aperture - feel.aperture) * mood;
+      feel.tilt += (profile.tilt - feel.tilt) * mood;
+      feel.glow += (profile.glow - feel.glow) * mood;
+      feel.sweep += (profile.sweep - feel.sweep) * mood;
+      feel.dim += (profile.dim - feel.dim) * mood;
+      feel.scale += (profile.scale - feel.scale) * mood;
+      for (let i = 0; i < 3; i++) {
+        cyan[i] += (profile.primary[i] - cyan[i]) * mood;
+        ice[i] += (profile.secondary[i] - ice[i]) * mood;
+        amber[i] += (profile.accent[i] - amber[i]) * mood;
+      }
       const activity = currentState === "idle" ? 0 : currentState === "thinking" ? 0.13 : 0.2;
       const audio = energyRef?.current ?? 0;
-      const wanted = Math.max(Number.isFinite(audio) ? Math.min(1, Math.max(0, audio)) : 0, activity);
+      const wanted = Math.max(
+        Number.isFinite(audio) ? Math.min(1, Math.max(0, audio)) : 0,
+        activity,
+        feel.energy * 0.55,
+      );
       energy += (wanted - energy) * (1 - Math.exp(-elapsed * (wanted > energy ? 15 : 5)));
-      redness += ((toneRef.current === "red" ? 1 : 0) - redness) * (1 - Math.exp(-elapsed * 8));
-      for (let i = 0; i < 3; i++) {
-        cyan[i] = CYAN[i] + (CORAL[i] - CYAN[i]) * redness;
-        ice[i] = ICE[i] + ([255, 220, 205][i] - ICE[i]) * redness;
-        amber[i] = AMBER[i] + (CORAL[i] - AMBER[i]) * redness * 0.45;
-      }
       if (!reduced) {
-        rotation += elapsed * (currentState === "thinking" ? 2.4 : 1 + energy * 0.65);
+        rotation += elapsed * (currentState === "thinking" ? 2.4 : 1 + energy * 0.65) * feel.spin;
       }
       const follow = 1 - Math.exp(-elapsed * 6);
       pointerX += ((reduced ? 0 : targetX) - pointerX) * follow;
       pointerY += ((reduced ? 0 : targetY) - pointerY) * follow;
       const parallaxX = reduced ? 0 : pointerX * 0.35;
       const parallaxY = reduced ? 0 : pointerY * 0.29;
-      const radius = baseRadius * (1 + (reduced ? 0 : energy * 0.035));
+      const breathe = reduced ? 0 : Math.sin(clock * (0.9 + feel.pulse * 1.4)) * (0.004 + feel.pulse * 0.005);
+      const radius = baseRadius * (1 + (reduced ? 0 : energy * 0.035) + breathe) * feel.scale;
+      // Inclinação de perspectiva: "curioso" vira o disco para olhar de lado.
+      const tilt = reduced ? 0 : feel.tilt + Math.sin(clock * 0.6) * feel.tilt * 0.35;
+      const tiltCos = Math.cos(tilt), tiltSin = Math.sin(tilt);
       // Keep a frontal view. Near and far planes slide in opposite directions.
       const project = (x: number, y: number, z: number): Point => {
-        const scale = radius * 3.9 / (3.9 - z);
+        const y2 = y * tiltCos - z * tiltSin;
+        const z2 = y * tiltSin + z * tiltCos;
+        const scale = radius * 3.9 / (3.9 - z2);
         return {
-          x: center + (x + z * parallaxX) * scale,
-          y: center + (y + z * parallaxY) * scale,
+          x: center + (x + z2 * parallaxX) * scale,
+          y: center + (y2 + z2 * parallaxY) * scale,
         };
       };
       const polar = (r: number, a: number, z: number) => project(Math.cos(a) * r, Math.sin(a) * r, z);
       const line = (a: Point, b: Point) => { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); };
       const scanAngle = reduced ? -0.85 : -0.85 + rotation * 0.51;
-      const scanLight = (angle: number) => Math.max(0, Math.cos(angle - scanAngle)) ** 22;
+      const scanLight = (angle: number) => Math.max(0, Math.cos(angle - scanAngle)) ** (20 * feel.sweep);
       const arcPath = (r: number, z: number, start: number, end: number, reverse = false) => {
         const count = Math.max(3, Math.ceil(Math.abs(end - start) * (small ? 13 : 27)));
         for (let i = 0; i <= count; i++) {
@@ -216,9 +303,10 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
       };
 
       ctx.clearRect(0, 0, size, size);
+      ctx.globalAlpha = feel.dim;
       ctx.lineCap = "butt";
       const emitter = project(0, 0, -0.54);
-      const aura = ctx.createRadialGradient(emitter.x, emitter.y, 0, emitter.x, emitter.y, radius * 1.23);
+      const aura = ctx.createRadialGradient(emitter.x, emitter.y, 0, emitter.x, emitter.y, radius * 1.23 * feel.glow);
       aura.addColorStop(0, color(cyan, 0.11 + energy * 0.1));
       aura.addColorStop(0.5, color(cyan, 0.047 + energy * 0.035));
       aura.addColorStop(0.83, color(cyan, 0.05 + energy * 0.04));
@@ -261,7 +349,7 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
       ctx.strokeStyle = color(cyan, 0.18); ctx.lineWidth = Math.max(0.5, unit * 1.05); ctx.stroke();
 
       // A recessed reticle leaves its center empty.
-      const aperture = APERTURE.map(([x, y]) => project(x, y, -0.3));
+      const aperture = APERTURE.map(([x, y]) => project(x * feel.aperture, y * feel.aperture, -0.3));
       face(aperture, color(cyan, 0.035));
       ctx.beginPath();
       for (const edge of [0, 1, 3, 4, 6]) {
@@ -278,9 +366,20 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
       ctx.lineWidth = Math.max(0.5, unit);
       ctx.stroke();
 
+      // Pulsos concêntricos: a "batida" muda de ritmo conforme a emoção.
+      if (!reduced && feel.pulse > 0.2) {
+        const period = 2.6 / Math.max(0.4, feel.pulse);
+        for (let p = 0; p < 2; p++) {
+          const age = (clock / period + p * 0.5) % 1;
+          const ringRadius = 0.18 + age * 0.95;
+          const alpha = (1 - age) ** 2 * 0.5 * Math.min(1, feel.pulse);
+          arc(ringRadius, -0.1 + age * 0.12, 0, TAU, 1.1 + age * 1.6, p === 0 ? cyan : amber, alpha);
+        }
+      }
+
       for (const { ring, index } of PAINT_ORDER) {
-        const r = ring.radius;
-        const z = ring.depth + (reduced ? 0 : energy * ring.depth * 0.17);
+        const r = ring.radius + (reduced ? 0 : Math.sin(clock * 6.3 + index) * 0.003 * feel.jitter);
+        const z = ring.depth + (reduced ? 0 : energy * ring.depth * 0.17 + Math.sin(clock * 8.5 + index * 1.7) * 0.014 * feel.jitter);
         const spin = ring.phase + rotation * ring.speed;
         const count = small ? Math.floor(ring.ticks / 2) : ring.ticks;
         const principal = index === 0 || index === 1 || index === 3 || index === 5;
@@ -353,10 +452,36 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
           if (!small) node(r, a + 2.8, z, amber, 1.8);
         }
       }
+      // Poeira orbital: quantidade e velocidade acompanham a emoção.
+      const motes = small ? 0 : Math.round(3 + feel.spark * 8);
+      for (let i = 0; i < motes; i++) {
+        const seed = i * 2.399;
+        const orbit = 0.44 + ((i * 37) % 100) / 100 * 0.6;
+        const direction = i % 2 ? -1 : 1;
+        const a = seed + clock * (0.32 + (i % 3) * 0.2) * feel.spin * direction;
+        const z = -0.18 + Math.sin(clock * 1.15 + seed) * 0.3;
+        node(orbit, a, z, i % 4 === 0 ? amber : cyan, 0.75 + (i % 3) * 0.3);
+      }
+
+      // Faíscas curtas: só aparecem em emoções agitadas.
+      if (!reduced && feel.jitter > 0.15) {
+        ctx.beginPath();
+        for (let i = 0; i < 16; i++) {
+          if (Math.sin(clock * 11 + i * 3.7) < 0.35) continue;
+          const a = i * 0.393 + clock * 1.6;
+          const z = -0.2 + Math.sin(a * 2.3) * 0.22;
+          line(polar(1.02, a, z), polar(1.02 + 0.04 + feel.jitter * 0.06, a, z));
+        }
+        ctx.strokeStyle = color(amber, 0.32 * feel.jitter);
+        ctx.lineWidth = Math.max(0.6, unit * 1.15);
+        ctx.stroke();
+      }
+
       for (let i = 0; i < (small ? 3 : 7); i++) {
         const a = i * 2.399 + rotation * (i % 2 ? -0.02 : 0.028);
         node(1.07 + (i % 3) * 0.025, a, -0.33 + Math.sin(a) * 0.19, i % 3 ? cyan : amber, i % 3 ? 1.8 : 2.9);
       }
+      ctx.globalAlpha = 1;
     };
     frame = frameWindow.requestAnimationFrame(draw);
     return () => {
@@ -370,7 +495,7 @@ export function Orb({ state = "idle", tone = "blue", energyRef, size = 240, clas
   }, [size, energyRef]);
 
   return (
-    <div className={`orb orb--${state} orb--${tone} ${className}`} style={{ width: size, height: size }} aria-hidden>
+    <div className={`orb orb--${state} orb--${tone} orb--${emotion ?? "calm"} ${className}`} style={{ width: size, height: size }} aria-hidden>
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
     </div>
   );

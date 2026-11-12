@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Orb, type OrbState, type OrbTone } from "./orb";
+import { Orb, type OrbEmotion, type OrbState, type OrbTone } from "./orb";
 import { AudioTrace } from "./audio-trace";
 import { openFloatingOrb } from "./floating-orb";
 import { TaskPanel } from "./task-panel";
@@ -380,6 +380,15 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
 
   const orbState: OrbState = heardSpeech ? "listening" : speaking ? "speaking"
     : pending || transcribing ? "thinking" : listening ? "listening" : remoteState;
+
+  // Emoção é o "humor" do orbe: deriva do que ele está fazendo agora.
+  const orbEmotion: OrbEmotion = tone === "red" ? "angry"
+    : heardSpeech ? "curious"
+    : speaking ? "excited"
+    : orbState === "thinking" ? "focused"
+    : orbState === "listening" ? "curious"
+    : orbState === "speaking" ? "excited"
+    : "calm";
 
   useEffect(() => {
     toneLiveRef.current = tone;
@@ -1100,7 +1109,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
 
       <section className={`hero ${showTranscript ? "is-compact" : ""}`} data-state={orbState}>
         <div className="hologram-stage">
-          <Orb className="hologram-orb" state={orbState} size={showTranscript ? (hud ? 76 : 114) : (hud ? 200 : 540)} tone={tone} energyRef={energyRef} />
+          <Orb className="hologram-orb" state={orbState} size={showTranscript ? (hud ? 76 : 114) : (hud ? 200 : 540)} tone={tone} emotion={orbEmotion} energyRef={energyRef} />
         </div>
         {!showTranscript ? <AudioTrace active={listening || speaking} source={listening ? micAnalyserRef : analyserRef} /> : null}
       </section>

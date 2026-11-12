@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Orb, type OrbState, type OrbTone } from "./orb";
+import { Orb, type OrbEmotion, type OrbState, type OrbTone } from "./orb";
 import { CloseIcon, FloatIcon, MicIcon, PanelIcon, SendIcon, SpeakerIcon, SpeakerOffIcon } from "./icons";
 import { takeSpeech } from "@/lib/speech-text";
 import { sentimentOf } from "@/lib/sentiment";
@@ -92,6 +92,21 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         : speaking
           ? "FALANDO"
           : "EM REPOUSO";
+
+  // Humor do orbe: cada estado vira uma emoção com movimento e cor próprios.
+  const emotion: OrbEmotion = tone === "red"
+    ? "angry"
+    : error
+      ? "alert"
+      : recording
+        ? "curious"
+        : transcribing || busy
+          ? "focused"
+          : speaking
+            ? "excited"
+            : remoteState === "listening"
+              ? "curious"
+              : "calm";
 
   const applyOpen = useCallback((next: boolean) => {
     if (openRef.current === next) return;
@@ -606,7 +621,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
 
       <div className="hud-core">
         <div className="hud-halo" />
-        <Orb state={orbState} tone={tone} energyRef={energyRef} size={258} />
+        <Orb state={orbState} tone={tone} emotion={emotion} energyRef={energyRef} size={258} />
         <span className="hud-status">{status}</span>
       </div>
 
