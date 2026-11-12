@@ -183,6 +183,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamRef = useRef("");
+  const ackRef = useRef("");
   const abortRef = useRef<AbortController | null>(null);
   const audioStarted = useRef<number | null>(null);
   const pinnedToBottom = useRef(true);
@@ -823,6 +824,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     setVoiceNote("");
     setStreamText("");
     streamRef.current = "";
+    ackRef.current = "";
     setToolEvents([]);
     if (raw === undefined) setInput("");
 
@@ -841,7 +843,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, ack: autoSpeakRef.current }),
+        body: JSON.stringify({ message: text, ack: true }),
         signal: controller.signal,
       });
 
@@ -860,8 +862,14 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
         if (controller.signal.aborted || abortRef.current !== controller) return;
         switch (event.type) {
           case "ack": {
-            // Frase de espera do agente rápido: entra na mesma fila da resposta.
-            if (speechQueueRef.current) queueSpeech(speechQueueRef.current, [event.text]);
+            // Frase de espera: aparece na conversa e entra na fila da fala.
+            const text = String(event.text ?? "").trim();
+            if (text && !streamRef.current) {
+              ackRef.current = text;
+              streamRef.current = text;
+              setStreamText(text);
+              if (speechQueueRef.current) queueSpeech(speechQueueRef.current, [text]);
+            }
             break;
           }
           case "meta": {
@@ -880,6 +888,10 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
             break;
           }
           case "text": {
+            if (ackRef.current) {
+              ackRef.current = "";
+              streamRef.current = "";
+            }
             streamRef.current += event.value;
             speakPart(event.value);
             if (streamRafRef.current == null) {

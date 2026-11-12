@@ -346,7 +346,12 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         switch (event.type) {
           case "ack": {
             const text = String(event.text ?? "").trim();
-            if (text) enqueueSpeech([text]);
+            if (text) {
+              setReply(text);
+              showBubble();
+              setTone("blue");
+              if (voiceRef.current) enqueueSpeech([text]);
+            }
             break;
           }
           case "text": {
@@ -395,7 +400,7 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message, ack: voiceRef.current }),
+          body: JSON.stringify({ message, ack: true }),
           signal: controller.signal,
         });
 

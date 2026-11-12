@@ -42,8 +42,8 @@ const EMOTIONS: Record<OrbEmotion, EmotionProfile> = {
   // calmo: grande, apagado, respiração lenta
   calm: {
     primary: [46, 215, 255], secondary: [194, 251, 255], accent: [255, 180, 77],
-    spin: 1, energy: 0, pulse: 0.35, jitter: 0, spark: 0.3, aperture: 1,
-    tilt: 0, glow: 1.16, sweep: 0.78, dim: 0.48, scale: 1.07,
+    spin: 1.06, energy: 0.05, pulse: 0.55, jitter: 0, spark: 0.5, aperture: 1,
+    tilt: 0, glow: 1.22, sweep: 0.86, dim: 0.55, scale: 1.07,
   },
   // curioso: inclina o disco e vira turquesa, como quem olha de lado
   curious: {
@@ -163,6 +163,7 @@ export function Orb({ state = "idle", tone = "blue", emotion, energyRef, size = 
       if (!visible || canvas.ownerDocument.hidden) return;
       const currentState = stateRef.current;
       const profile = toneRef.current === "red" ? EMOTIONS.angry : EMOTIONS[emotionRef.current] ?? EMOTIONS.calm;
+      const idle = currentState === "idle" ? 1 : 0;
       const mood = 1 - Math.exp(-elapsed * 2.6);
       clock += elapsed;
       feel.spin += (profile.spin - feel.spin) * mood;
@@ -183,24 +184,29 @@ export function Orb({ state = "idle", tone = "blue", emotion, energyRef, size = 
       }
       const activity = currentState === "idle" ? 0 : currentState === "thinking" ? 0.13 : 0.2;
       const audio = energyRef?.current ?? 0;
+      const heartbeat = idle ? Math.pow(Math.max(0, Math.sin(clock * 0.7)), 12) * 0.06 : 0;
+      const idleLife = idle ? 0.03 + 0.02 * (0.5 + 0.5 * Math.sin(clock * 0.83)) + heartbeat : 0;
       const wanted = Math.max(
         Number.isFinite(audio) ? Math.min(1, Math.max(0, audio)) : 0,
         activity,
         feel.energy * 0.55,
+        idleLife,
       );
       energy += (wanted - energy) * (1 - Math.exp(-elapsed * (wanted > energy ? 15 : 5)));
       if (!reduced) {
-        rotation += elapsed * (currentState === "thinking" ? 2.4 : 1 + energy * 0.65) * feel.spin;
+        rotation += elapsed * (currentState === "thinking" ? 2.4 : 1 + energy * 0.65 + idle * 0.1) * feel.spin;
       }
       const follow = 1 - Math.exp(-elapsed * 6);
       pointerX += ((reduced ? 0 : targetX) - pointerX) * follow;
       pointerY += ((reduced ? 0 : targetY) - pointerY) * follow;
       const parallaxX = reduced ? 0 : pointerX * 0.35;
       const parallaxY = reduced ? 0 : pointerY * 0.29;
-      const breathe = reduced ? 0 : Math.sin(clock * (0.9 + feel.pulse * 1.4)) * (0.004 + feel.pulse * 0.005);
+      const breathe = reduced ? 0
+        : Math.sin(clock * (0.9 + feel.pulse * 1.4)) * (0.006 + feel.pulse * 0.006)
+          + (idle ? Math.sin(clock * 0.37) * 0.0035 : 0);
       const radius = baseRadius * (1 + (reduced ? 0 : energy * 0.035) + breathe) * feel.scale;
       // Inclinação de perspectiva: "curioso" vira o disco para olhar de lado.
-      const tilt = reduced ? 0 : feel.tilt + Math.sin(clock * 0.6) * feel.tilt * 0.35;
+      const tilt = reduced ? 0 : feel.tilt + Math.sin(clock * 0.6) * feel.tilt * 0.35 + (idle ? Math.sin(clock * 0.29) * 0.022 : 0);
       const tiltCos = Math.cos(tilt), tiltSin = Math.sin(tilt);
       // Keep a frontal view. Near and far planes slide in opposite directions.
       const project = (x: number, y: number, z: number): Point => {

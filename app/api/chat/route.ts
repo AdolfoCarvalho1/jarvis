@@ -110,8 +110,8 @@ export async function POST(request: Request) {
         const chatTools = [...coreToolDefinitions(allTools), ...META_TOOLS];
         send({ type: "meta", conversationId, title: conversation.title, model });
         if (payload.ack === true) ack = setTimeout(() => {
-          if (!visible && !activeTool && !signal.aborted) send({ type: "ack", text: "Já vejo isso, senhor." });
-        }, 1800);
+          if (!visible && !signal.aborted) send({ type: "ack", text: "Já vejo isso, senhor." });
+        }, 250);
 
         let finished = false;
         let promptTokens = 0;
