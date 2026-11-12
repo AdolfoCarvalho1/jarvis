@@ -1,0 +1,26 @@
+{
+  "_nota": "Modelo de .data/mcp.json (o arquivo real fica fora do git). Copie para .data/mcp.json e ajuste.",
+  "servers": {
+    "demo": {
+      "command": "node",
+      "args": ["scripts/mcp-demo.mjs"],
+      "approval": false
+    },
+    "navegador": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.85",
+        "--browser", "chrome",
+        "--isolated",
+        "--headless",
+        "--image-responses", "omit",
+        "--output-dir", ".data/browser",
+        "--timeout-action", "10000",
+        "--timeout-navigation", "45000"
+      ],
+      "env": {},
+      "approval": true
+    }
+  }
+}
