@@ -29,6 +29,7 @@ interface McpServer {
   state: string;
   error: string;
   approval: boolean;
+  enabled: boolean;
   tools: Array<{ name: string; exposed: string }>;
 }
 
@@ -268,6 +269,8 @@ function SkillsTab() {
 function McpTab() {
   const [servers, setServers] = useState<McpServer[]>([]);
   const [status, setStatus] = useState("carregando…");
+  const [envFor, setEnvFor] = useState("");
+  const [envText, setEnvText] = useState("");
 
   const load = useCallback(async () => {
     const data = (await fetch("/api/mcp").then((response) => response.json())) as { servers?: McpServer[] };
@@ -290,6 +293,36 @@ function McpTab() {
     }
   }, []);
 
+  const patch = useCallback(
+    async (nome: string, mudanca: { enabled?: boolean; approval?: boolean; env?: Record<string, string> | null }) => {
+      setStatus("aplicando…");
+      try {
+        const data = await post<{ servers?: McpServer[] }>("/api/mcp", { acao: "servidor", nome, patch: mudanca });
+        setServers(data.servers ?? []);
+        setStatus("ok");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "falha");
+      }
+    },
+    [],
+  );
+
+  const saveEnv = useCallback(
+    async (nome: string) => {
+      let parsed: Record<string, string>;
+      try {
+        parsed = envText.trim() ? (JSON.parse(envText) as Record<string, string>) : {};
+      } catch {
+        setStatus("JSON de env inválido");
+        return;
+      }
+      await patch(nome, { env: parsed });
+      setEnvFor("");
+      setEnvText("");
+    },
+    [envText, patch],
+  );
+
   return (
     <div className="hp-tab">
       <div className="hp-row">
@@ -301,10 +334,32 @@ function McpTab() {
           <li key={server.name}>
             <div>
               <strong>{server.name}</strong>
-              <em className={server.state === "ready" ? "ok" : "bad"}>{server.state}</em>
+              <em className={server.state === "ready" ? "ok" : "bad"}>{server.enabled ? server.state : "off"}</em>
             </div>
             <small>{server.tools.length} ferramentas · aprovação {server.approval ? "sim" : "não"}</small>
             {server.error ? <p className="hp-error">{server.error}</p> : null}
+            <div className="hp-mcp-actions">
+              <button type="button" onClick={() => void patch(server.name, { enabled: !server.enabled })}>
+                {server.enabled ? "desligar" : "ligar"}
+              </button>
+              <button type="button" onClick={() => void patch(server.name, { approval: !server.approval })}>
+                aprovação {server.approval ? "on" : "off"}
+              </button>
+              <button type="button" onClick={() => { setEnvFor(envFor === server.name ? "" : server.name); setEnvText(""); }}>
+                env
+              </button>
+            </div>
+            {envFor === server.name ? (
+              <div className="hp-env">
+                <textarea
+                  value={envText}
+                  onChange={(event) => setEnvText(event.target.value)}
+                  placeholder={'{"CHAVE":"valor"} — substitui todo o env'}
+                  spellCheck={false}
+                />
+                <button type="button" onClick={() => void saveEnv(server.name)}>salvar env</button>
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -369,4 +424,20 @@ const CSS = `
   .hp-servers em.ok { color: #6fe0a8; }
   .hp-servers em.bad { color: #ff8f7d; }
   .hp-servers small { font-size: 9.5px; color: #6d97a8; }
+  .hp-mcp-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .hp-mcp-actions button {
+    flex: 1 1 auto; cursor: pointer; border-radius: 6px; padding: 3px 6px; font-size: 9.5px;
+    border: 1px solid rgba(72,178,214,.22); background: rgba(12,36,48,.8); color: #b9dce9;
+  }
+  .hp-mcp-actions button:hover { background: rgba(22,70,92,.9); color: #eafaff; }
+  .hp-env { display: grid; gap: 4px; margin-top: 6px; }
+  .hp-env textarea {
+    min-height: 52px; resize: vertical; border-radius: 6px; padding: 5px;
+    border: 1px solid rgba(72,178,214,.22); background: rgba(3,12,18,.9); color: #dff2fa;
+    font: 9.5px/1.4 var(--font-geist-mono), ui-monospace, monospace;
+  }
+  .hp-env button {
+    justify-self: end; cursor: pointer; border-radius: 6px; padding: 3px 8px; font-size: 9.5px;
+    border: 1px solid rgba(72,178,214,.25); background: rgba(18,54,72,.9); color: #cdeffb;
+  }
 `;

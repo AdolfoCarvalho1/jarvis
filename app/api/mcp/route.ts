@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { executeMcpTool, isMcpTool, mcpRequiresApproval, mcpStatus, reloadMcp } from "@/lib/mcp";
+import { executeMcpTool, isMcpTool, mcpRequiresApproval, mcpStatus, reloadMcp, updateMcpServer } from "@/lib/mcp";
 
 export const dynamic = "force-dynamic";
 
@@ -9,12 +9,29 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as
-    | { acao?: string; ferramenta?: string; argumentos?: Record<string, unknown>; aprovado?: boolean }
+    | {
+        acao?: string;
+        ferramenta?: string;
+        argumentos?: Record<string, unknown>;
+        aprovado?: boolean;
+        nome?: string;
+        patch?: { enabled?: boolean; approval?: boolean; env?: Record<string, string> | null };
+      }
     | null;
   const acao = String(body?.acao ?? "");
 
   if (acao === "recarregar") {
     return NextResponse.json(await reloadMcp());
+  }
+
+  if (acao === "servidor") {
+    const nome = String(body?.nome ?? "");
+    if (!nome) return NextResponse.json({ error: "informe o nome do servidor" }, { status: 400 });
+    try {
+      return NextResponse.json(await updateMcpServer(nome, body?.patch ?? {}));
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "falha ao atualizar" }, { status: 400 });
+    }
   }
 
   if (acao === "chamar") {

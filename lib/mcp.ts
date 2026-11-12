@@ -301,6 +301,7 @@ export interface McpStatus {
     state: ServerState;
     error: string;
     approval: boolean;
+    enabled: boolean;
     tools: Array<{ name: string; description: string; exposed: string }>;
   }>;
 }
@@ -314,6 +315,7 @@ export async function mcpStatus(): Promise<McpStatus> {
       state: server.runtime.state,
       error: server.runtime.error,
       approval: server.runtime.config.approval !== false,
+      enabled: server.runtime.config.enabled !== false,
       tools: server.runtime.tools.map((tool) => ({
         name: tool.name,
         description: (tool.description ?? "").slice(0, 400),
@@ -321,6 +323,31 @@ export async function mcpStatus(): Promise<McpStatus> {
       })),
     })),
   };
+}
+
+/** Liga/desliga, alterna aprovação ou substitui o env de um servidor no .data/mcp.json. */
+export async function updateMcpServer(
+  name: string,
+  patch: { enabled?: boolean; approval?: boolean; env?: Record<string, string> | null },
+): Promise<McpStatus> {
+  const cfg = readConfig();
+  const key = Object.keys(cfg.servers).find((item) => safeName(item) === safeName(name));
+  if (!key) throw new Error(`servidor "${name}" não está na configuração`);
+
+  const next: ServerConfig = { ...cfg.servers[key] };
+  if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
+  if (typeof patch.approval === "boolean") next.approval = patch.approval;
+  if (patch.env !== undefined) next.env = patch.env ?? {};
+
+  cfg.servers[key] = next;
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+
+  const existing = store.servers.get(safeName(key)) ?? store.servers.get(key);
+  existing?.stop();
+  store.servers.delete(key);
+  store.servers.delete(safeName(key));
+  return mcpStatus();
 }
 
 export async function reloadMcp(): Promise<McpStatus> {

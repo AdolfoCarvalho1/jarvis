@@ -45,7 +45,16 @@ export async function GET(request: Request) {
       return new NextResponse("sem captura", { status: 404 });
     }
   }
-  return NextResponse.json({ ...state, shotUrl: `/api/browser?shot=1&t=${state.shotAt}` });
+  let shotAt = state.shotAt;
+  if (!shotAt) {
+    try {
+      const info = await fs.stat(SHOT_PATH);
+      shotAt = info.mtimeMs;
+    } catch {
+      /* sem captura */
+    }
+  }
+  return NextResponse.json({ ...state, shotAt, shotUrl: `/api/browser?shot=1&t=${shotAt}` });
 }
 
 export async function POST(request: Request) {
