@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { mcpToolDefinitions } from "@/lib/mcp";
 import { tools } from "@/lib/tools";
 import { META_TOOLS, coreToolDefinitions } from "@/lib/tool-catalog";
+import { sandboxStatus } from "@/lib/policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,5 +22,6 @@ export async function GET() {
     bytes,
     tokensAprox: Math.round(bytes / 3.6),
     todas: all.map((tool) => tool.function.name).sort(),
+    sandbox: sandboxStatus(),
   });
 }

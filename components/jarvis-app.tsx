@@ -8,6 +8,7 @@ import { Orb, type OrbEmotion, type OrbState, type OrbTone } from "./orb";
 import { AudioTrace } from "./audio-trace";
 import { openFloatingOrb } from "./floating-orb";
 import { TaskPanel } from "./task-panel";
+import { ActivityPanel } from "./activity-panel";
 import { useVoiceInput } from "./use-voice-input";
 import { sentimentOf } from "@/lib/sentiment";
 import { takeSpeech } from "@/lib/speech-text";
@@ -157,7 +158,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [drawer, setDrawer] = useState<null | "memoria" | "lembretes" | "contexto" | "tarefas">(null);
+  const [drawer, setDrawer] = useState<null | "memoria" | "lembretes" | "contexto" | "tarefas" | "atividade">(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [contextInfo, setContextInfo] = useState<ContextInfo>({
@@ -1309,6 +1310,9 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
             <button className={drawer === "tarefas" ? "is-active" : ""} onClick={() => setDrawer("tarefas")}>
               TAREFAS
             </button>
+            <button className={drawer === "atividade" ? "is-active" : ""} onClick={() => setDrawer("atividade")}>
+              ATIVIDADE
+            </button>
           </div>
           <button className="icon-btn" onClick={() => setDrawer(null)} aria-label="Fechar painel">
             <CloseIcon />
@@ -1317,6 +1321,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
 
         <div className="drawer-body">
           {drawer === "tarefas" ? <TaskPanel /> : null}
+          {drawer === "atividade" ? <ActivityPanel /> : null}
           {drawer === "memoria" ? (
             <>
               <form

@@ -11,6 +11,9 @@ import { executeMcpTool, isMcpTool, mcpRequiresApproval } from "./mcp";
 import { listSkills, readSkill } from "./skills";
 import { writeProjectFile } from "./editor";
 import { listLocalTools, runLocalTool } from "./localtools";
+import { defaultModel } from "./ai";
+import { runSubagent } from "./subagent";
+import { classifyTool, decideTool, policyRequiresApproval } from "./policy";
 
 export interface ToolDefinition {
   type: "function";
@@ -228,6 +231,7 @@ export const TOOL_LABELS: Record<string, string> = {
   cancelar_tarefa: "Cancelando tarefa",
   buscar_arquivos_projeto: "Buscando arquivos",
   gerenciar_rotina: "Gerenciando rotina",
+  delegar_tarefa: "Delegando ao subagente",
 };
 
 export const tools: ToolDefinition[] = [
@@ -497,18 +501,44 @@ export const tools: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "delegar_tarefa",
+      description:
+        "Delega uma pesquisa ou análise longa a um subagente isolado e somente leitura: ele usa busca, leitura de URL, arquivos, Obsidian, lembretes e hora, e devolve um resumo. Use para investigações com várias etapas. Não serve para escrever código nem controlar o PC.",
+      parameters: {
+        type: "object",
+        properties: {
+          objetivo: {
+            type: "string",
+            description: "O que o subagente deve descobrir ou analisar, com o critério de conclusão.",
+          },
+          contexto: {
+            type: "string",
+            description: "Contexto adicional relevante para o subagente (opcional).",
+          },
+        },
+        required: ["objetivo"],
+      },
+    },
+  },
 ];
+
+/** Ferramentas somente leitura que o subagente pode executar (sem recursão). */
+const SUBAGENT_ALLOWED = new Set([
+  "pesquisar_web",
+  "abrir_url",
+  "ler_arquivo",
+  "listar_arquivos",
+  "consultar_obsidian",
+  "listar_lembretes",
+  "hora_atual",
+]);
 
 export function toolRequiresApproval(name: string, args: Record<string, unknown>) {
   if (isMcpTool(name)) return mcpRequiresApproval(name);
-  if (name === "executar_tool_local" && String(args.nome ?? "") === "composio") {
-    const acao = String((args.argumentos as Record<string, unknown> | undefined)?.acao ?? "search");
-    return acao === "execute";
-  }
-  return ["ver_tela", "controlar_pc", "executar_projeto", "acompanhar_arquivo", "cancelar_tarefa",
-    "escrever_arquivo",
-    "lembrar", "criar_lembrete", "concluir_lembrete", "salvar_nota_obsidian"].includes(name) ||
-    (name === "gerenciar_rotina" && args.acao !== "listar");
+  return policyRequiresApproval(classifyTool(name, args));
 }
 
 export async function executeTool(name: string, args: Record<string, unknown>, signal: AbortSignal, approved = false): Promise<string> {
@@ -517,7 +547,8 @@ export async function executeTool(name: string, args: Record<string, unknown>, s
     if (toolRequiresApproval(name, args) && !approved) return JSON.stringify({ error: "Ação não autorizada." });
     return executeMcpTool(name, args, signal);
   }
-  if (toolRequiresApproval(name, args) && !approved) return JSON.stringify({ error: "Ação não autorizada." });
+  const decision = decideTool(name, args, approved);
+  if (!decision.ok) return JSON.stringify({ error: decision.error ?? "Ação não autorizada.", policy: decision.policy });
   try {
     switch (name) {
       case "listar_skills":
@@ -563,6 +594,19 @@ export async function executeTool(name: string, args: Record<string, unknown>, s
 
       case "executar_tool_local":
         return runLocalTool(String(args.nome ?? ""), (args.argumentos ?? {}) as Record<string, unknown>);
+
+      case "delegar_tarefa": {
+        const objetivo = String(args.objetivo ?? "").trim();
+        if (!objetivo) return JSON.stringify({ error: "objetivo vazio" });
+        const contexto = String(args.contexto ?? "").trim();
+        const definitions = tools.filter((tool) => SUBAGENT_ALLOWED.has(tool.function.name));
+        const resultado = await runSubagent(objetivo, contexto || undefined, signal, {
+          definitions,
+          execute: (name, toolArgs, toolSignal) => executeTool(name, toolArgs, toolSignal, false),
+          model: defaultModel(),
+        });
+        return JSON.stringify(resultado);
+      }
 
       case "pesquisar_web":
         return await searchWeb(String(args.query ?? ""), Math.min(Number(args.max_results ?? 5) || 5, 8), signal);

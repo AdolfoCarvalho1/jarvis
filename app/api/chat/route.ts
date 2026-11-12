@@ -5,6 +5,7 @@ import { askApproval } from "@/lib/approvals";
 import { cancelTask } from "@/lib/automation/store";
 import { maybeCompact } from "@/lib/context";
 import { storage } from "@/lib/db";
+import { appendEvent } from "@/lib/events";
 import { buildSystemPrompt } from "@/lib/prompt";
 import { getActiveModel, getContextState, getMainConversation } from "@/lib/session";
 import { TOOL_LABELS, executeTool, toolRequiresApproval, tools } from "@/lib/tools";
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
   const message = typeof payload?.message === "string" ? payload.message.trim() : "";
   if (!message) return Response.json({ error: "Digite ou dite uma mensagem." }, { status: 400 });
   if (message.length > 24_000) return Response.json({ error: "A mensagem excede 24 mil caracteres." }, { status: 413 });
+  const turnId = randomUUID();
   if (!hasCredentials()) {
     return Response.json({ error: "Configure OPENCODE_GO_API_KEY no .env.local e reinicie o servidor." }, { status: 503 });
   }
@@ -85,6 +87,7 @@ export async function POST(request: Request) {
       let activeTool: ToolEvent | undefined;
       let conversationId: string | undefined;
       let visible = "";
+      let rounds = 0;
       const queuedTasks: string[] = [];
       try {
         signal.throwIfAborted();
@@ -96,6 +99,8 @@ export async function POST(request: Request) {
           storage.listMemories(), storage.listReminders(true), getContextState(conversation.id),
           getActiveModel(), storage.countMessages(conversation.id),
         ]);
+        appendEvent(conversation.id, turnId, "turn/start", { model, message: message.slice(0, 2000) });
+        appendEvent(conversation.id, turnId, "user/message", { chars: message.length });
         const history = await storage.listMessages(conversation.id, Math.max(1, Math.min(100, total - context.compactedMessages)));
         signal.throwIfAborted();
         const turns: ChatTurn[] = [
@@ -120,6 +125,7 @@ export async function POST(request: Request) {
         let perfMs = 0;
         for (let round = 0; round < MAX_ROUNDS; round++) {
           signal.throwIfAborted();
+          rounds += 1;
           const roundStart = performance.now();
           let lastText = 0;
           const outcome = await streamCompletion({
@@ -130,6 +136,12 @@ export async function POST(request: Request) {
               visible += chunk;
               send({ type: "text", value: chunk });
             },
+          });
+          appendEvent(conversationId, turnId, "model/request", {
+            round,
+            toolCalls: outcome.toolCalls.length,
+            promptTokens: outcome.usage?.promptTokens,
+            completionTokens: outcome.usage?.completionTokens,
           });
           if (outcome.usage) {
             promptTokens += outcome.usage.promptTokens;
@@ -159,6 +171,7 @@ export async function POST(request: Request) {
             let result: string;
             let eventName = name;
             let label = TOOL_LABELS[name] ?? name;
+            const toolStartedAt = performance.now();
             if (!targetArgs) {
               result = JSON.stringify({ error: "Parâmetros da operação inválidos." });
             } else if (name === "listar_ferramentas") {
@@ -191,6 +204,7 @@ export async function POST(request: Request) {
               if (name === "usar_ferramenta" && !findToolDefinition(allTools, targetName)) {
                 result = JSON.stringify({ error: `ferramenta "${targetName}" não existe; use listar_ferramentas antes` });
               } else {
+                appendEvent(conversationId, turnId, "tool/call", { name: eventName, args: targetArgs });
                 const needsApproval = toolRequiresApproval(targetName, targetArgs);
                 let approved = false;
                 const details = JSON.stringify(targetArgs, null, 2);
@@ -216,6 +230,12 @@ export async function POST(request: Request) {
               }
             }
             const event: ToolEvent = { id, name: eventName, label, ...toolResult(result) };
+            appendEvent(conversationId, turnId, "tool/result", {
+              name: eventName,
+              status: event.status,
+              detail: event.detail,
+              ms: Math.round(performance.now() - toolStartedAt),
+            });
             activeTool = undefined;
             await storage.addMessage(conversationId, "tool", JSON.stringify(event));
             send({ type: "tool", ...event });
@@ -233,6 +253,12 @@ export async function POST(request: Request) {
         }
         signal.throwIfAborted();
         const saved = await storage.addMessage(conversationId, "assistant", visible);
+        appendEvent(conversationId, turnId, "assistant/message", {
+          chars: visible.length,
+          text: visible.slice(0, 2000),
+          promptTokens,
+          completionTokens,
+        });
         signal.throwIfAborted();
         compactId = conversationId;
         if (perfTokens) send({ type: "perf", tokens: perfTokens, ms: perfMs, tps: perfTokens / (perfMs / 1000) });
@@ -254,7 +280,12 @@ export async function POST(request: Request) {
           ? "O processamento excedeu o prazo. Tente enviar novamente."
           : error instanceof Error ? error.message : "Falha inesperada.";
         send({ type: "error", message: failure });
+        if (conversationId) appendEvent(conversationId, turnId, "turn/error", { message: failure });
       } finally {
+        if (conversationId) appendEvent(conversationId, turnId, "turn/end", {
+          ms: Math.round(performance.now() - receivedAt),
+          rounds,
+        });
         clearInterval(heartbeat);
         clearTimeout(ack);
         request.signal.removeEventListener("abort", onDisconnect);
