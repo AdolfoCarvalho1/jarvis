@@ -494,6 +494,10 @@ export const tools: ToolDefinition[] = [
 
 export function toolRequiresApproval(name: string, args: Record<string, unknown>) {
   if (isMcpTool(name)) return mcpRequiresApproval(name);
+  if (name === "executar_tool_local" && String(args.nome ?? "") === "composio") {
+    const acao = String((args.argumentos as Record<string, unknown> | undefined)?.acao ?? "search");
+    return acao === "execute";
+  }
   return ["ver_tela", "controlar_pc", "executar_projeto", "acompanhar_arquivo", "cancelar_tarefa",
     "escrever_arquivo",
     "lembrar", "criar_lembrete", "concluir_lembrete", "salvar_nota_obsidian"].includes(name) ||
