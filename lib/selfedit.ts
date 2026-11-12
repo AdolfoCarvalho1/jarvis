@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -7,12 +7,12 @@ const ROOT_FILES = new Set([
   "agents.md", "readme.md", "package.json", "tsconfig.json", "proxy.ts",
   "next.config.ts", "eslint.config.mjs", "instrumentation.ts", "dev.cmd", "serve.cmd",
 ]);
-const SOURCE_DIRS = new Set(["app", "components", "lib", "hud", "public", "scripts", "supabase"]);
+const SOURCE_DIRS = new Set(["app", "components", "lib", "hud", "public", "scripts", "supabase", "skills", "tests"]);
 const SOURCE_FILE = /\.(?:ts|tsx|js|cjs|mjs|css|md|json|sql|py|ps1|cmd|vbs|svg)$/i;
 const PRIVATE = /^(?:\.|node_modules$|credentials(?:[._-]|$)|secrets?(?:[._-]|$)|package-lock\.json$)/i;
 const MAX_BYTES = 60_000;
 
-async function resolveSource(relative: string, kind: "file" | "directory", allowMissing = false) {
+export async function resolveSource(relative: string, kind: "file" | "directory", allowMissing = false) {
   const raw = relative.replace(/\\/g, "/");
   if (path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw)) throw new Error("Use um caminho relativo.");
   const root = await realpath(/* turbopackIgnore: true */ ROOT);
@@ -87,7 +87,8 @@ export async function listProjectFiles(folder = "", limit = 200, signal?: AbortS
 export async function readProjectFile(relative: string, signal?: AbortSignal) {
   const { rel, abs } = await resolveSource(relative, "file");
   const text = await readSource(abs, signal);
-  return { caminho: rel, conteudo: text.slice(0, 30_000), truncado: text.length > 30_000 };
+  const hash = createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16);
+  return { caminho: rel, conteudo: text.slice(0, 30_000), truncado: text.length > 30_000, hash };
 }
 
 export interface EditFile {

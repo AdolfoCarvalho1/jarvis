@@ -129,6 +129,19 @@ function setMode(mode) {
   log("modo", hudMode);
 }
 
+function recenter() {
+  if (!win) return;
+  const area = screen.getPrimaryDisplay().workArea;
+  const bounds = win.getBounds();
+  win.setBounds({
+    x: Math.round(area.x + area.width - bounds.width - 28),
+    y: Math.round(area.y + area.height - bounds.height - 24),
+    width: bounds.width,
+    height: bounds.height,
+  });
+  savePosition();
+}
+
 function fromHud(event) {
   return event.sender === win?.webContents &&
     event.senderFrame === win.webContents.mainFrame && isHudPage(event.senderFrame?.url);
@@ -139,6 +152,7 @@ function isHudPage(url) {
 }
 
 ipcMain.on("hud:mode", (event, mode) => { if (fromHud(event)) setMode(mode); });
+ipcMain.on("hud:recenter", (event) => { if (fromHud(event)) recenter(); });
 ipcMain.on("hud:open", (event, open) => { if (fromHud(event)) setOpen(Boolean(open)); });
 ipcMain.on("hud:hide", (event) => { if (fromHud(event)) hideWindow(); });
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { HudAssistant } from "@/components/hud-assistant";
+import { HarnessPanel } from "@/components/harness-panel";
 import JarvisApp from "@/components/jarvis-app";
 
 type HudMode = "assistant" | "harness";
@@ -43,10 +44,11 @@ export default function HudPage() {
             ← assistente
           </button>
           <span className="harness-tag">HARNESS</span>
-          <span className="harness-hint">chat · tela · navegador · composio</span>
+          <span className="harness-hint">navegador · arquivos · skills · mcp</span>
         </header>
         <div className="harness-body">
           <JarvisApp hud />
+          <HarnessPanel />
         </div>
         <style>{HARNESS_CSS}</style>
       </div>
@@ -76,6 +78,6 @@ const HARNESS_CSS = `
   .harness-hint {
     font: 9px/1 var(--font-geist-mono), ui-monospace, monospace; letter-spacing: .12em; color: #4f7f92;
   }
-  .harness-body { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
-  .harness-body .shell { height: 100% !important; }
+  .harness-body { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; display: flex; }
+  .harness-body .shell { flex: 1 1 auto; min-width: 0; height: 100% !important; }
 `;

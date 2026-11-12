@@ -59,6 +59,7 @@ declare global {
     jarvisHud?: {
       setOpen: (open: boolean) => void;
       setMode: (mode: "assistant" | "harness") => void;
+      recenter: () => void;
       hide: () => void;
       onTalk: (handler: () => void) => () => void;
       onHidden: (handler: () => void) => () => void;

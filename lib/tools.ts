@@ -8,6 +8,9 @@ import { executeTaskTool, taskTools } from "./automation/chat-tools";
 import { automationEnabled, syncReminderTask } from "./automation/tasks";
 import { cancelTask } from "./automation/store";
 import { executeMcpTool, isMcpTool, mcpRequiresApproval } from "./mcp";
+import { listSkills, readSkill } from "./skills";
+import { writeProjectFile } from "./editor";
+import { listLocalTools, runLocalTool } from "./localtools";
 
 export interface ToolDefinition {
   type: "function";
@@ -425,11 +428,74 @@ export const tools: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "listar_skills",
+      description: "Lista as skills disponíveis (nome, descrição, gatilhos e tamanho). Use quando o índice do prompt estiver incompleto ou o usuário perguntar o que você sabe fazer.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ler_skill",
+      description: "Lê o corpo de uma skill pelo slug. Chame antes de executar uma tarefa que casa com a descrição da skill — nunca por curiosidade.",
+      parameters: {
+        type: "object",
+        properties: { nome: { type: "string", description: "Slug da skill (ex.: deploy-local)" } },
+        required: ["nome"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "escrever_arquivo",
+      description:
+        "Grava um arquivo de código do projeto (até 60 KB), com backup automático e escopo restrito. Exige aprovação. Informe hashBase recebido de ler_arquivo para evitar sobrescrever edição concorrente.",
+      parameters: {
+        type: "object",
+        properties: {
+          caminho: { type: "string", description: "Caminho relativo dentro do projeto (ex.: lib/ping.ts)" },
+          conteudo: { type: "string", description: "Conteúdo completo do arquivo" },
+          hashBase: { type: "string", description: "Hash devolvido por ler_arquivo, se o arquivo já existia" },
+          motivo: { type: "string", description: "Uma linha explicando a mudança" },
+        },
+        required: ["caminho", "conteudo"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "listar_tools_locais",
+      description: "Lista as ferramentas locais em Python/Rust (scripts/tools) que rodam sem modelo: nome, descrição e parâmetros.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "executar_tool_local",
+      description:
+        "Executa uma ferramenta local determinística (Python ou binário Rust) e devolve o JSON de saída. Use para contas, disco, porta, git e rotinas exatas em vez de calcular ou inventar.",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: { type: "string", description: "Nome da ferramenta (ex.: soma, disco, porta, git_status)" },
+          argumentos: { type: "object", description: "Argumentos conforme o schema da ferramenta" },
+        },
+        required: ["nome"],
+      },
+    },
+  },
 ];
 
 export function toolRequiresApproval(name: string, args: Record<string, unknown>) {
   if (isMcpTool(name)) return mcpRequiresApproval(name);
   return ["ver_tela", "controlar_pc", "executar_projeto", "acompanhar_arquivo", "cancelar_tarefa",
+    "escrever_arquivo",
     "lembrar", "criar_lembrete", "concluir_lembrete", "salvar_nota_obsidian"].includes(name) ||
     (name === "gerenciar_rotina" && args.acao !== "listar");
 }
@@ -443,6 +509,50 @@ export async function executeTool(name: string, args: Record<string, unknown>, s
   if (toolRequiresApproval(name, args) && !approved) return JSON.stringify({ error: "Ação não autorizada." });
   try {
     switch (name) {
+      case "listar_skills":
+        return JSON.stringify({
+          skills: listSkills().map((skill) => ({
+            nome: skill.slug,
+            descricao: skill.description,
+            quando: skill.quando,
+            bytes: skill.bytes,
+            valida: !skill.invalid,
+            erro: skill.invalid,
+          })),
+        });
+
+      case "ler_skill": {
+        const skill = readSkill(String(args.nome ?? "").trim().toLowerCase());
+        if (!skill) return JSON.stringify({ error: "skill não encontrada" });
+        return JSON.stringify({
+          nome: skill.slug,
+          descricao: skill.description,
+          corpo: skill.body,
+          referencias: skill.references,
+          truncado: skill.truncated,
+        });
+      }
+
+      case "escrever_arquivo": {
+        const resultado = await writeProjectFile(String(args.caminho ?? ""), String(args.conteudo ?? ""), {
+          origem: "agente",
+          hashBase: args.hashBase ? String(args.hashBase) : undefined,
+          motivo: String(args.motivo ?? ""),
+        });
+        return JSON.stringify(resultado);
+      }
+
+      case "listar_tools_locais": {
+        try {
+          return JSON.stringify({ ferramentas: await listLocalTools() });
+        } catch (error) {
+          return JSON.stringify({ error: error instanceof Error ? error.message : "falha ao listar ferramentas locais" });
+        }
+      }
+
+      case "executar_tool_local":
+        return runLocalTool(String(args.nome ?? ""), (args.argumentos ?? {}) as Record<string, unknown>);
+
       case "pesquisar_web":
         return await searchWeb(String(args.query ?? ""), Math.min(Number(args.max_results ?? 5) || 5, 8), signal);
 

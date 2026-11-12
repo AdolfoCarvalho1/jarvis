@@ -1,4 +1,5 @@
 import type { MemoryItem, Reminder } from "./types";
+import { skillsPromptBlock } from "./skills";
 
 interface PromptContext {
   memories: MemoryItem[];
@@ -19,6 +20,7 @@ function formatWhen(iso: string | null): string {
 
 export function buildSystemPrompt({ memories, reminders, context }: PromptContext): string {
   const now = new Date();
+  const skillsBlock = skillsPromptBlock();
   const stamp = new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "full",
     timeStyle: "short",
@@ -76,7 +78,10 @@ MEMÓRIA PERMANENTE
 ${memoryBlock}
 
 LEMBRETES PENDENTES
-${reminderBlock}${
+${reminderBlock}
+
+SKILLS DISPONÍVEIS (instruções reutilizáveis; antes de uma tarefa que case com a descrição, chame ler_skill; nunca leia por curiosidade)
+${skillsBlock || "(nenhuma skill instalada)"}${
     context
       ? `
 

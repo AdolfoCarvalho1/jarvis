@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Orb, type OrbEmotion, type OrbState, type OrbTone } from "./orb";
-import { CloseIcon, FloatIcon, MicIcon, PanelIcon, SendIcon, SpeakerIcon, SpeakerOffIcon } from "./icons";
+import { CloseIcon, FloatIcon, MicIcon, PanelIcon, RecenterIcon, SendIcon, SpeakerIcon, SpeakerOffIcon } from "./icons";
 import { takeSpeech } from "@/lib/speech-text";
 import { sentimentOf } from "@/lib/sentiment";
 
@@ -24,6 +24,7 @@ declare global {
     jarvisHud?: {
       setOpen: (open: boolean) => void;
       setMode: (mode: "assistant" | "harness") => void;
+      recenter: () => void;
       hide: () => void;
       onTalk: (handler: () => void) => () => void;
       onHidden: (handler: () => void) => () => void;
@@ -591,6 +592,10 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
         if (!busyRef.current && !recording && !transcribing && !speaking && !bubbleVisible && !input.trim()) applyOpen(false);
       }}
     >
+      <div className="hud-grip" title="Arraste para mover a janela" aria-hidden>
+        <i /><i /><i />
+      </div>
+
       <div className="hud-tools">
         <button
           type="button"
@@ -614,6 +619,9 @@ export function HudAssistant({ onHarness }: { onHarness?: () => void }) {
             <PanelIcon size={13} />
           </button>
         ) : null}
+        <button type="button" onClick={() => window.jarvisHud?.recenter()} title="Recentralizar" aria-label="Recentralizar">
+          <RecenterIcon size={13} />
+        </button>
         <button type="button" onClick={closeWindow} title="Fechar" aria-label="Fechar">
           <CloseIcon size={13} />
         </button>
@@ -703,6 +711,16 @@ const CSS = `
     justify-content: flex-start; padding: 6px 10px 10px; gap: 6px; overflow: hidden;
     font-family: var(--font-geist-sans), system-ui, sans-serif; background: transparent;
   }
+  .hud-grip {
+    position: absolute; top: 3px; left: 50%; transform: translateX(-50%); z-index: 6;
+    display: flex; gap: 3px; align-items: center; justify-content: center;
+    width: 58px; height: 16px; border-radius: 9px;
+    background: rgba(6,20,29,.62); border: 1px solid rgba(72,178,214,.22);
+    -webkit-app-region: drag; cursor: grab; opacity: .4; transition: opacity .15s ease;
+  }
+  .hud:hover .hud-grip, .hud-grip:hover { opacity: .95; }
+  .hud-grip:active { cursor: grabbing; }
+  .hud-grip i { width: 3px; height: 3px; border-radius: 50%; background: #8ad6ec; }
   .hud-tools {
     position: absolute; top: 6px; right: 8px; display: flex; gap: 5px; z-index: 3;
     opacity: 0; transition: opacity .18s ease;

@@ -90,6 +90,15 @@ export function PanelIcon({ size = 18, className }: IconProps) {
   );
 }
 
+export function RecenterIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...base}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+    </svg>
+  );
+}
+
 export function CloseIcon({ size = 18, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...base}>
