@@ -48,7 +48,6 @@ function clockLabel() {
 export default function HudPage() {
   const mode = useSyncExternalStore(subscribeMode, readMode, serverMode);
   const [online, setOnline] = useState<boolean | null>(null);
-  const [model, setModel] = useState("");
   const [health, setHealth] = useState<{ provider: string; storage: string; obsidian: boolean | null }>({
     provider: "",
     storage: "",
@@ -87,7 +86,6 @@ export default function HudPage() {
         };
         if (!alive) return;
         setOnline(Boolean(data.ok));
-        setModel(typeof data.model === "string" ? data.model : "");
         setHealth({
           provider: typeof data.provider === "string" ? data.provider : "",
           storage: typeof data.storage === "string" ? data.storage : "",
@@ -115,6 +113,11 @@ export default function HudPage() {
     modeListeners.forEach((listener) => listener());
   }, []);
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("mode");
+    if (requested === "harness" || requested === "assistant") change(requested);
+  }, [change]);
+
   if (mode === "harness") {
     return (
       <div className="harness" data-mode="harness">
@@ -134,12 +137,6 @@ export default function HudPage() {
           <div className="harness-status">
             <i className={online === null ? "is-check" : online === false ? "is-off" : undefined} aria-hidden="true" />
             <span>{online === null ? "VERIFICANDO" : online ? "ONLINE" : "OFFLINE"}</span>
-            {model ? (
-              <>
-                <span className="sep">/</span>
-                <b>{model}</b>
-              </>
-            ) : null}
             {clock ? (
               <>
                 <span className="sep">/</span>
@@ -154,8 +151,8 @@ export default function HudPage() {
             <div className="rail-brand">
               <span className="rail-glyph" aria-hidden="true" />
               <div>
-                <b>J.A.R.V.I.S.</b>
-                <span>HARNESS / 01</span>
+                <b>BANCADA</b>
+                <span>SESSÃO 01</span>
               </div>
             </div>
             <div className="rail-block">
@@ -171,12 +168,12 @@ export default function HudPage() {
                 </li>
                 <li>
                   <b>Ctrl+Alt+K</b>
-                  <span>clique-através</span>
+                  <span>clique através</span>
                 </li>
               </ul>
             </div>
             <div className="rail-block rail-status">
-              <p className="rail-label">NÚCLEO</p>
+              <p className="rail-label">SISTEMA</p>
               <ul className="rail-keys">
                 <li>
                   <b>{health.provider || "—"}</b>
@@ -328,6 +325,10 @@ const HARNESS_CSS = `
   .harness-thread .shell {
     height: 100%; max-width: none; margin: 0; padding: 0; min-height: 0;
   }
+  .harness-thread .shell--empty .chat-empty {
+    align-content: start; padding-top: 18px;
+  }
+  .harness-thread .shell--empty .hero.is-compact { padding-bottom: 2px; }
   .harness-thread .shell--hud .topbar {
     min-height: 0; padding: 0 0 16px; justify-content: flex-end;
   }

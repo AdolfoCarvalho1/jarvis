@@ -848,6 +848,7 @@ const CSS = `
   .hud[data-state="listening"] .hud-status,
   .hud[data-state="thinking"] .hud-status,
   .hud[data-state="speaking"] .hud-status { color: var(--jv-accent-2); }
+  .hud:not(.is-open) .hud-status { opacity: 0; }
   .hud-core canvas { position: relative; z-index: 1; display: block; }
   .hud-bubble {
     position: relative; z-index: 1;

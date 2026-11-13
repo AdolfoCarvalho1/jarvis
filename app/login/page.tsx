@@ -30,27 +30,29 @@ export default function LoginPage() {
 
   return (
     <main className="login-shell">
-      <form className="login-card" onSubmit={submit}>
+      <section className="login-brand" aria-label="J.A.R.V.I.S.">
+        <i className="login-mark" aria-hidden="true" />
+        <p className="login-kicker">Just A Rather Very Intelligent System</p>
         <h1 className="login-title">
           J.<span>A.</span>R.<span>V.</span>I.<span>S.</span>
         </h1>
-        <p className="login-sub">
-          Just A Rather Very Intelligent System
-          <br />
-          Identifique-se para iniciar a sessão.
-        </p>
+        <p className="login-note">Sistema local. Acesso restrito.</p>
+      </section>
+
+      <form className="login-card" onSubmit={submit}>
+        <p className="login-kicker">Chave de acesso</p>
         <label className="field">
-          <span className="mono">CHAVE DE ACESSO</span>
+          <span className="sr-only">Chave de acesso</span>
           <input
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoFocus
             autoComplete="current-password"
-            placeholder="••••••••"
+            placeholder="Digite aqui"
           />
         </label>
-        {error ? <p className="login-error mono">{error}</p> : null}
+        {error ? <p className="login-error mono" role="alert">{error}</p> : null}
         <button type="submit" className="btn-primary" disabled={busy || !password}>
           {busy ? "VERIFICANDO…" : "ENTRAR"}
         </button>

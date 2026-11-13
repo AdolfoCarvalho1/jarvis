@@ -254,7 +254,7 @@ function BrowserTab() {
   const scheme = /^http:\/\//i.test(url) ? "http://" : "https://";
   const address = url.replace(/^https?:\/\//i, "");
   const hasShot = Boolean(browser.shotAt && browser.title && browser.url);
-  const shotTime = hasShot ? new Date(browser.shotAt).toLocaleTimeString("pt-BR") : "sem captura";
+  const shotTime = hasShot ? new Date(browser.shotAt).toLocaleTimeString("pt-BR") : "";
 
   return (
     <div className="hp-tab">
@@ -298,32 +298,36 @@ function BrowserTab() {
 
       <div className="hp-head">
         <span>viewport</span>
-        <b>{shotTime}</b>
+        {shotTime ? <b>{shotTime}</b> : null}
       </div>
-      <div className="hp-frame hp-frame-view">
+      <div className={`hp-frame hp-frame-view ${hasShot ? "" : "is-empty"}`}>
         {hasShot ? (
           <a href={`/api/browser?shot=1&t=${browser.shotAt}`} target="_blank" rel="noreferrer" title="Abrir a captura em tamanho real">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`/api/browser?shot=1&t=${browser.shotAt}`} alt="captura da página" />
           </a>
         ) : (
-          <span className="hp-frame-empty">sem captura ainda</span>
+          <span className="hp-frame-empty">Nenhuma captura. Digite um endereço e use IR.</span>
         )}
       </div>
 
-      <div className="hp-head">
-        <span>página</span>
-      </div>
-      <ul className="hp-rows">
-        <li className="hp-row">
-          <span className="hp-row-key">título</span>
-          <span className="hp-row-val">{browser.title ? <b>{browser.title}</b> : "—"}</span>
-        </li>
-        <li className="hp-row">
-          <span className="hp-row-key">endereço</span>
-          <span className="hp-row-val">{browser.url || "—"}</span>
-        </li>
-      </ul>
+      {hasShot ? (
+        <>
+          <div className="hp-head">
+            <span>página</span>
+          </div>
+          <ul className="hp-rows">
+            <li className="hp-row">
+              <span className="hp-row-key">título</span>
+              <span className="hp-row-val"><b>{browser.title}</b></span>
+            </li>
+            <li className="hp-row">
+              <span className="hp-row-key">endereço</span>
+              <span className="hp-row-val">{browser.url}</span>
+            </li>
+          </ul>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -373,7 +377,7 @@ function ScreenTab() {
       <div className="hp-head">
         <span>tela do pc</span>
         <span className="hp-head-right">
-          <b>{status || (state.at ? new Date(state.at).toLocaleTimeString("pt-BR") : "sem captura")}</b>
+          {status || state.at ? <b>{status || new Date(state.at).toLocaleTimeString("pt-BR")}</b> : null}
           <button type="button" className="hp-act" onClick={() => void capture()} disabled={busy !== ""}>
             {busy === "capturar" ? "capturando…" : "capturar"}
           </button>
@@ -386,7 +390,7 @@ function ScreenTab() {
         </p>
       ) : null}
 
-      <div className="hp-frame hp-frame-img">
+      <div className={`hp-frame hp-frame-img ${state.at ? "" : "is-empty"}`}>
         {state.at ? (
           <a href={`/api/screen?shot=1&t=${state.at}`} target="_blank" rel="noreferrer" title="Abrir em tamanho real">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -877,7 +881,7 @@ const CSS = `
     position: relative; border: 0; background: none; margin: 0;
     padding: 0 0 7px; text-align: left; cursor: pointer;
     color: var(--jv-dim);
-    font: 600 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+    font: 600 10.5px/1 var(--font-geist-mono), ui-monospace, monospace;
     letter-spacing: .1em; text-transform: uppercase;
     transition: color .15s ease;
   }
@@ -1031,13 +1035,22 @@ const CSS = `
   }
   .hp-frame-view { width: 100%; aspect-ratio: 16 / 10; overflow: auto; display: block; }
   .hp-frame-view .hp-frame-empty { display: grid; place-items: center; height: 100%; }
+  .hp-frame-view.is-empty,
+  .hp-frame-img.is-empty {
+    aspect-ratio: auto; min-height: 132px;
+    border: 0; border-top: 1px solid var(--jv-line); background: transparent;
+  }
+  .hp-frame-view.is-empty .hp-frame-empty,
+  .hp-frame-img.is-empty .hp-frame-empty {
+    display: block; height: auto; max-width: 32ch; color: var(--jv-muted); text-align: left;
+  }
   .hp-frame-img { width: 100%; aspect-ratio: 16 / 10; overflow: hidden; }
   .hp-frame a { display: block; width: 100%; }
   .hp-frame img { display: block; width: 100%; height: auto; }
   .hp-frame-empty {
     color: var(--jv-dim);
-    font: 400 10px/1.4 var(--font-geist-mono), ui-monospace, monospace;
-    letter-spacing: .06em;
+    font: 400 11px/1.5 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .04em;
   }
 
   .hp-skills { flex: 0 1 auto; max-height: 46%; }

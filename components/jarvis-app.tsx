@@ -92,6 +92,13 @@ const operationLabels: Record<ToolEvent["status"], string> = {
   error: "Falhou", cancelled: "Interrompida",
 };
 
+function operationTitle(label: string) {
+  if (/mcp__navegador__browser_navigate/i.test(label)) return "Abrindo página";
+  if (/mcp__navegador__browser_/i.test(label)) return "Navegador";
+  if (/^Usando\s+mcp__/i.test(label)) return "Ferramenta externa";
+  return label;
+}
+
 function Operation({ event }: { event: ToolEvent }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -110,11 +117,19 @@ function Operation({ event }: { event: ToolEvent }) {
     }
   }
   const needsApproval = event.status === "approval";
+  const detail = event.detail?.trim() ?? "";
+  const detailIsStatus = /^(conclu[ií]do|ok|done)\.?$/i.test(detail);
+  const technical = detail.length > 280 || detail.includes("\n") || /###|```|playwright|await page/i.test(detail);
+  const showDetail = Boolean(detail) && !(event.status === "done" && detailIsStatus);
   return (
     <article id={`operation-${event.id}`} className="operation" data-status={event.status} tabIndex={-1}>
-      <header><strong>{event.label}</strong><span>{operationLabels[event.status]}</span></header>
-      {event.detail ? needsApproval
-        ? <pre tabIndex={0} aria-label="Parâmetros da operação">{event.detail}</pre> : <p>{event.detail}</p> : null}
+      <header><strong>{operationTitle(event.label)}</strong><span>{operationLabels[event.status]}</span></header>
+      {showDetail ? needsApproval
+        ? <pre tabIndex={0} aria-label="Parâmetros da operação">{detail}</pre>
+        : event.status === "done" && technical
+          ? <details className="operation-details"><summary>detalhes da operação</summary><pre>{detail}</pre></details>
+          : <p>{detail}</p>
+        : null}
       {needsApproval ? (
         <div className="operation-actions">
           <button type="button" disabled={sending} onClick={() => void decide(false)}>Recusar</button>
@@ -339,7 +354,15 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     if (anchor) {
       element.scrollTop = anchor.top + element.scrollHeight - anchor.height;
       preserveScroll.current = null;
-    } else if (pinnedToBottom.current) element.scrollTop = element.scrollHeight;
+    } else if (pinnedToBottom.current) {
+      element.scrollTop = element.scrollHeight;
+      requestAnimationFrame(() => {
+        if (pinnedToBottom.current) element.scrollTop = element.scrollHeight;
+      });
+      window.setTimeout(() => {
+        if (pinnedToBottom.current) element.scrollTop = element.scrollHeight;
+      }, 120);
+    }
   }, [messages, streamText, toolEvents, showTranscript]);
 
   useEffect(() => {
@@ -470,6 +493,26 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
   const storedOperations = new Set(messages.filter((message) => message.role === "tool")
     .map((message) => readOperation(message.content)?.id));
   const liveOperations = toolEvents.filter((event) => !storedOperations.has(event.id));
+  const hiddenStoredOperations = new Set<string>();
+  let previousOperation = "";
+  for (const message of messages) {
+    if (message.role !== "tool") {
+      previousOperation = "";
+      continue;
+    }
+    const operation = readOperation(message.content);
+    if (!operation) continue;
+    const signature = `${operation.label}\u0000${operation.status}\u0000${operation.detail ?? ""}`;
+    if (signature === previousOperation) hiddenStoredOperations.add(message.id);
+    previousOperation = signature;
+  }
+  const visibleLiveOperations = liveOperations.filter((event, index) => {
+    const previous = liveOperations[index - 1];
+    return !previous
+      || previous.label !== event.label
+      || previous.status !== event.status
+      || previous.detail !== event.detail;
+  });
   const awaitingApproval = liveOperations.find((event) => event.status === "approval");
   const pendingReminders = useMemo(() => reminders.filter((item) => !item.done).length, [reminders]);
 
@@ -1162,8 +1205,6 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
           <>
             <p className="hero-caption">
               <b>{orbStatusLabel}</b>
-              <span aria-hidden="true">·</span>
-              NÚCLEO 01
             </p>
             <AudioTrace active={listening || speaking} source={listening ? micAnalyserRef : analyserRef} />
           </>
@@ -1182,15 +1223,14 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
         </button> : null}
         {messages.length === 0 && !pending ? (
           <div className="chat-empty">
-            <p className="chat-kicker">Núcleo 01 · canal direto</p>
             <h1>Como posso ajudar?</h1>
-            <p>Escreva uma mensagem ou use o microfone para falar com o Jarvis.</p>
           </div>
         ) : null}
         {messages.map((message) => {
           if (message.role === "tool") {
             const operation = readOperation(message.content);
-            return operation ? <Operation key={message.id} event={operation} /> : null;
+            if (!operation || hiddenStoredOperations.has(message.id)) return null;
+            return <Operation key={message.id} event={operation} />;
           }
           const stamp = clockTime(message.created_at);
           return (
@@ -1224,7 +1264,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
           );
         })}
 
-        {liveOperations.map((event) => <Operation key={event.id} event={event} />)}
+        {visibleLiveOperations.map((event) => <Operation key={event.id} event={event} />)}
 
         {streamText ? (
           <article className="msg msg--jarvis">
@@ -1257,7 +1297,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
               setShowTranscript((value) => !value);
             }}
           >
-            {showTranscript ? "Modo esfera" : "Abrir conversa"}
+            {showTranscript ? (hud ? "Recolher conversa" : "Modo esfera") : "Abrir conversa"}
             {!showTranscript && messages.length > 0 ? <span className="dot" /> : null}
           </button>
           <button type="button" className="transcript-btn" aria-pressed={voiceSession}
@@ -1277,13 +1317,12 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
             void submitMessage();
           }}
         >
-          <span className="composer-label" aria-hidden="true">Pergunte ou fale</span>
           <textarea
             ref={textareaRef}
             value={input}
             rows={1}
             aria-label="Mensagem"
-            placeholder={listening && !voiceSession ? "Gravando áudio…" : "Mensagem"}
+            placeholder={listening && !voiceSession ? "Gravando áudio…" : "Pergunte ou fale"}
             maxLength={24_000}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -1725,7 +1764,8 @@ const APP_CSS = `
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 6px 0 20px;
+    padding: 6px 0 48px;
+    scroll-padding-bottom: 24px;
     scroll-behavior: smooth;
     scrollbar-width: thin;
     scrollbar-color: var(--jv-line-strong) transparent;
@@ -1954,6 +1994,18 @@ const APP_CSS = `
   .jv-app .operation[data-status="approval"] header span { color: var(--jv-accent-2); }
   .jv-app .operation[data-status="error"] header span { color: var(--jv-danger); }
   .jv-app .operation p { margin: 6px 0 0; color: var(--jv-muted); }
+  .jv-app .operation-details { margin-top: 6px; }
+  .jv-app .operation-details summary {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--jv-muted); cursor: pointer;
+    font: 500 10px/1.5 var(--font-mono);
+    letter-spacing: 0.1em; text-transform: uppercase;
+    list-style: none;
+  }
+  .jv-app .operation-details summary::-webkit-details-marker { display: none; }
+  .jv-app .operation-details summary::before { content: "+"; color: var(--jv-accent); }
+  .jv-app .operation-details[open] summary::before { content: "−"; }
+  .jv-app .operation-details summary:hover { color: var(--jv-text); }
   .jv-app .operation pre {
     margin: 8px 0 0;
     padding: 0;

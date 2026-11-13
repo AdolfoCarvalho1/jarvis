@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Orb, type OrbEmotion, type OrbState } from "@/components/orb";
 
 const EMOTIONS: Array<{ id: OrbEmotion; label: string; hint: string }> = [
@@ -12,34 +12,42 @@ const EMOTIONS: Array<{ id: OrbEmotion; label: string; hint: string }> = [
   { id: "alert", label: "Alerta", hint: "erro, batida elétrica" },
 ];
 
-const STATES: OrbState[] = ["idle", "thinking", "listening", "speaking"];
+const STATES: Array<{ id: OrbState; label: string }> = [
+  { id: "idle", label: "Repouso" },
+  { id: "thinking", label: "Pensando" },
+  { id: "listening", label: "Ouvindo" },
+  { id: "speaking", label: "Falando" },
+];
 
 export default function OrbLab() {
   const [emotion, setEmotion] = useState<OrbEmotion>("calm");
   const [state, setState] = useState<OrbState>("idle");
-  const [energy, setEnergy] = useState(0);
-  const energyRef = useRef(0);
-  energyRef.current = energy;
 
   return (
     <main className="lab">
-      <div className="lab-stage">
-        <Orb state={state} tone={emotion === "angry" ? "red" : "blue"} emotion={emotion} energyRef={energyRef} size={460} />
-        <p className="lab-now">
-          {EMOTIONS.find((item) => item.id === emotion)?.label} · {state}
-        </p>
-      </div>
+      <header className="lab-head">
+        <p className="lab-kicker">Laboratório</p>
+        <h1>Orbe</h1>
+      </header>
 
-      <aside className="lab-panel">
-        <h1>Laboratório do orbe</h1>
-        <p className="lab-sub">Escolha a emoção e o estado para ver o movimento.</p>
+      <section className="lab-stage" aria-label="Prévia do orbe">
+        <Orb
+          state={state}
+          tone={emotion === "angry" ? "red" : "blue"}
+          emotion={emotion}
+          size={460}
+        />
+      </section>
 
+      <aside className="lab-panel" aria-label="Controles do orbe">
         <div className="lab-group">
+          <p className="lab-label">Emoção</p>
           {EMOTIONS.map((item) => (
             <button
               key={item.id}
               type="button"
               className={emotion === item.id ? "is-on" : ""}
+              aria-pressed={emotion === item.id}
               onClick={() => setEmotion(item.id)}
             >
               <strong>{item.label}</strong>
@@ -48,52 +56,96 @@ export default function OrbLab() {
           ))}
         </div>
 
-        <div className="lab-row">
-          {STATES.map((item) => (
-            <button key={item} type="button" className={state === item ? "is-on" : ""} onClick={() => setState(item)}>
-              {item}
-            </button>
-          ))}
+        <div className="lab-group">
+          <p className="lab-label">Estado</p>
+          <div className="lab-row">
+            {STATES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={state === item.id ? "is-on" : ""}
+                aria-pressed={state === item.id}
+                onClick={() => setState(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
-
-        <label className="lab-energy">
-          energia {Math.round(energy * 100)}%
-          <input type="range" min={0} max={1} step={0.01} value={energy} onChange={(event) => setEnergy(Number(event.target.value))} />
-        </label>
       </aside>
 
       <style>{`
-        html, body { background: #03060a; }
+        html, body { background: var(--jv-bg, #070809); }
         .lab {
-          min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px;
-          padding: 24px; color: #e6f6ff; font-family: var(--font-geist-sans), system-ui, sans-serif;
-          background: radial-gradient(circle at 34% 42%, rgba(12,44,62,.55), #03060a 62%);
+          min-height: 100dvh;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 360px;
+          grid-template-rows: auto minmax(0, 1fr);
+          gap: 32px 48px;
+          padding: 32px 48px 40px;
+          color: var(--jv-text, #f2f2ee);
+          font-family: var(--font-geist-sans), system-ui, sans-serif;
+          background:
+            radial-gradient(760px 520px at 32% 42%, rgba(255, 138, 30, .075), transparent 68%),
+            var(--jv-bg, #070809);
         }
-        .lab-stage { display: grid; place-items: center; gap: 8px; }
-        .lab-now {
-          margin: 0; font: 11px/1 ui-monospace, monospace; letter-spacing: .22em;
-          text-transform: uppercase; color: #7fc4da;
+        .lab-head { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 18px; }
+        .lab-kicker {
+          margin: 0;
+          font: 500 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+          letter-spacing: .22em;
+          text-transform: uppercase;
+          color: var(--jv-dim, #7d7d76);
         }
-        .lab-panel { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
-        .lab-panel h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
-        .lab-sub { margin: 0 0 4px; font-size: 12px; color: #7ea6b6; }
-        .lab-group { display: grid; gap: 6px; }
+        .lab-head h1 { margin: 0; font: 600 28px/1 var(--font-geist-sans), system-ui, sans-serif; letter-spacing: -.035em; }
+        .lab-stage { display: grid; place-items: center; align-content: center; gap: 18px; min-width: 0; }
+        .lab-stage .orb { width: min(460px, 68vw) !important; height: auto !important; aspect-ratio: 1; }
+        .lab-panel { display: flex; flex-direction: column; justify-content: center; gap: 30px; padding-top: 2px; }
+        .lab-group { display: grid; gap: 0; }
+        .lab-label {
+          margin: 0 0 8px;
+          font: 600 10px/1 var(--font-geist-mono), ui-monospace, monospace;
+          letter-spacing: .2em; text-transform: uppercase; color: var(--jv-muted, #9b9b95);
+        }
         .lab-group button {
-          display: flex; flex-direction: column; align-items: flex-start; gap: 2px; cursor: pointer;
-          padding: 8px 10px; text-align: left; border-radius: 10px;
-          border: 1px solid rgba(72,178,214,.22); background: rgba(8,26,36,.7); color: #cfeaf5;
+          position: relative;
+          display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px;
+          min-width: 0; padding: 9px 0 9px 14px; border: 0; border-bottom: 1px solid var(--jv-line, rgba(255,255,255,.09));
+          background: none; text-align: left; color: var(--jv-muted, #9b9b95); cursor: pointer;
         }
-        .lab-group button strong { font-size: 12px; font-weight: 600; }
-        .lab-group button span { font-size: 10.5px; color: #7099aa; }
-        .lab-group button.is-on { border-color: rgba(96,216,255,.65); background: rgba(20,64,84,.85); box-shadow: 0 0 0 3px rgba(40,140,180,.12); }
-        .lab-row { display: flex; gap: 6px; }
+        .lab-group button::before {
+          content: ""; position: absolute; left: 0; top: 16px;
+          width: 4px; height: 4px; background: var(--jv-line-strong, rgba(255,255,255,.18));
+          transform: rotate(45deg);
+        }
+        .lab-group button:hover { color: var(--jv-text, #f2f2ee); }
+        .lab-group button strong { font: 500 13px/1.3 var(--font-geist-sans), system-ui, sans-serif; color: inherit; }
+        .lab-group button span { font: 400 12.5px/1.4 var(--font-geist-sans), system-ui, sans-serif; color: var(--jv-muted, #9b9b95); }
+        .lab-group button.is-on { color: var(--jv-accent, #ff8a1e); }
+        .lab-group button.is-on::before { background: var(--jv-accent, #ff8a1e); }
+        .lab-group button.is-on strong { font-weight: 600; }
+        .lab-group button.is-on span { color: var(--jv-muted, #9b9b95); }
+        .lab-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
         .lab-row button {
-          flex: 1; cursor: pointer; padding: 6px 8px; border-radius: 8px; font-size: 11px;
-          border: 1px solid rgba(72,178,214,.22); background: rgba(8,26,36,.7); color: #b9dce9;
+          position: relative; display: block; padding: 9px 0 9px 14px; border: 0; border-bottom: 1px solid var(--jv-line, rgba(255,255,255,.09));
+          background: none; text-align: left; cursor: pointer;
+          font: 400 12.5px/1.3 var(--font-geist-sans), system-ui, sans-serif; color: var(--jv-muted, #9b9b95);
         }
-        .lab-row button.is-on { border-color: rgba(96,216,255,.6); background: rgba(20,64,84,.85); color: #eafaff; }
-        .lab-energy { display: grid; gap: 6px; font: 10.5px/1 ui-monospace, monospace; letter-spacing: .14em; color: #7ea6b6; }
-        .lab-energy input { width: 100%; accent-color: #4fd6ff; }
+        .lab-row button::before {
+          content: ""; position: absolute; left: 0; top: 16px;
+          width: 4px; height: 4px; background: var(--jv-line-strong, rgba(255,255,255,.18));
+          transform: rotate(45deg);
+        }
+        .lab-row button:hover { color: var(--jv-text, #f2f2ee); }
+        .lab-row button.is-on { color: var(--jv-accent, #ff8a1e); }
+        .lab-row button.is-on::before { background: var(--jv-accent, #ff8a1e); }
+        @media (max-width: 900px) {
+          .lab { grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 24px; padding: 24px; }
+          .lab-head { grid-column: 1; }
+          .lab-stage { order: 2; }
+          .lab-panel { order: 3; }
+          .lab-stage .orb { width: min(340px, 76vw) !important; }
+        }
       `}</style>
     </main>
   );
