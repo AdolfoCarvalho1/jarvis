@@ -499,52 +499,12 @@ button:disabled {
 }
 
 .orb {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  background: none;
-  box-shadow: none;
-  filter: none;
-  animation: orb-turn 90s linear infinite;
-}
-
-.orb img {
   display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  object-fit: contain;
-  pointer-events: none;
-  user-select: none;
-  transform-origin: 50% 50%;
-  animation: orb-breathe 9s ease-in-out infinite;
+  flex: none;
 }
 
-.orb--thinking { animation-duration: 26s; }
-.orb--thinking img { animation-duration: 3.6s; }
-.orb--listening { animation-duration: 48s; }
-.orb--listening img { animation: orb-breathe 1.6s ease-in-out infinite; }
-.orb--speaking { animation-duration: 34s; }
-.orb--speaking img { animation: orb-pulse 0.9s ease-in-out infinite; }
-.orb--red img { filter: hue-rotate(-38deg) saturate(1.25); }
-
-@keyframes orb-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.018); }
-}
-
-@keyframes orb-pulse {
-  0%, 100% { transform: scale(1.005); }
-  50% { transform: scale(1.045); }
-}
-
-@keyframes orb-turn {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .orb,
-  .orb img { animation: none !important; }
+.orb canvas {
+  display: block;
 }
 
 .msg {
