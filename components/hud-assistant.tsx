@@ -788,13 +788,8 @@ const CSS = `
     color: var(--jv-text); background: transparent;
   }
   .hud.is-open { justify-content: flex-start; }
-  /* véu neutro único: dá contraste sobre qualquer desktop, sem virar caixa */
-  .hud::before {
-    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background:
-      radial-gradient(78% 56% at 50% 34%, rgba(7,8,9,.7) 0%, rgba(7,8,9,.44) 52%, rgba(7,8,9,0) 78%),
-      linear-gradient(180deg, rgba(7,8,9,0) 32%, rgba(7,8,9,.55) 58%, rgba(7,8,9,.9) 100%);
-  }
+  /* Sem véu nem placa atrás do orbe: o overlay é realmente transparente. */
+  .hud::before { display: none; }
   .hud-tools {
     position: absolute; top: 6px; right: 8px; z-index: 6;
     display: flex; align-items: center; gap: 2px;

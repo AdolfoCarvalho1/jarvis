@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-type Tab = "navegador" | "tela" | "arquivos" | "skills" | "mcp" | "atividade";
+type Tab = "inicio" | "navegador" | "tela" | "arquivos" | "skills" | "mcp" | "atividade";
 
 interface BrowserState {
   url: string;
@@ -41,6 +41,7 @@ interface HarnessEvent {
 }
 
 const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "inicio", label: "INÍCIO" },
   { id: "navegador", label: "NAVEGADOR" },
   { id: "tela", label: "TELA" },
   { id: "arquivos", label: "ARQUIVOS" },
@@ -149,8 +150,17 @@ function failedEvent(event: HarnessEvent): boolean {
 }
 
 export function HarnessPanel() {
-  const [tab, setTab] = useState<Tab>("navegador");
+  const [tab, setTab] = useState<Tab>("inicio");
   const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (TABS.some((item) => item.id === detail)) setTab(detail as Tab);
+    };
+    window.addEventListener("jarvis:harness-tab", open);
+    return () => window.removeEventListener("jarvis:harness-tab", open);
+  }, []);
 
   const moveTab = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -203,6 +213,7 @@ export function HarnessPanel() {
           </div>
           <div className="hp-body">
             <div className="hp-pane" id="hp-pane" role="tabpanel" aria-labelledby={`hp-tab-${tab}`}>
+              {tab === "inicio" && <StartTab onOpen={setTab} />}
               {tab === "navegador" && <BrowserTab />}
               {tab === "tela" && <ScreenTab />}
               {tab === "arquivos" && <FilesTab />}
@@ -215,6 +226,42 @@ export function HarnessPanel() {
       )}
       <style>{CSS}</style>
     </aside>
+  );
+}
+
+function StartTab({ onOpen }: { onOpen: (tab: Tab) => void }) {
+  return (
+    <div className="hp-tab hp-start">
+      <h2 className="hp-start-title">Abrir</h2>
+      <p className="hp-start-sub">Ferramentas desta sessão.</p>
+
+      <div className="hp-start-list">
+        <button type="button" className="hp-start-action" onClick={() => onOpen("arquivos")}>
+          <span className="hp-start-glyph" aria-hidden="true">▤</span>
+          <span className="hp-start-copy">
+            <b>Arquivos</b>
+            <small>Explorar o workspace desta sessão</small>
+          </span>
+          <span className="hp-start-arrow" aria-hidden="true">↗</span>
+        </button>
+        <button type="button" className="hp-start-action" onClick={() => onOpen("navegador")}>
+          <span className="hp-start-glyph" aria-hidden="true">◌</span>
+          <span className="hp-start-copy">
+            <b>Navegador</b>
+            <small>Abrir uma página e ver a captura</small>
+          </span>
+          <span className="hp-start-arrow" aria-hidden="true">↗</span>
+        </button>
+        <button type="button" className="hp-start-action" onClick={() => onOpen("atividade")}>
+          <span className="hp-start-glyph" aria-hidden="true">⌁</span>
+          <span className="hp-start-copy">
+            <b>Atividade</b>
+            <small>O que o JARVIS fez neste turno</small>
+          </span>
+          <span className="hp-start-arrow" aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -852,9 +899,9 @@ function ActivityTab() {
 
 const CSS = `
   .hpanel {
-    width: 380px; flex: 0 0 380px; min-height: 0;
+    width: 360px; flex: 0 0 360px; min-height: 0;
     display: flex; flex-direction: column;
-    padding: 0 20px 16px 24px;
+    padding: 0 18px 16px 22px;
     position: relative; overflow: hidden;
     background: transparent;
     color: var(--jv-text);
@@ -873,8 +920,8 @@ const CSS = `
   .hpanel.is-collapsed .hp-collapse { top: 10px; right: 5px; }
 
   .hp-tabs {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: 12px; row-gap: 6px;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    column-gap: 10px; row-gap: 6px;
     padding: 22px 0 0;
   }
   .hp-tabs button {
@@ -899,6 +946,45 @@ const CSS = `
     padding-top: 18px; overflow-y: auto; overflow-x: hidden;
     scrollbar-width: thin; scrollbar-color: var(--jv-line-strong) transparent;
   }
+
+  /* início: três entradas grandes, sem cartões */
+  .hp-start { gap: 0; }
+  .hp-start-kicker {
+    margin: 0; color: var(--jv-dim);
+    font: 600 9.5px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .2em; text-transform: uppercase;
+  }
+  .hp-start-title {
+    margin: 9px 0 0; color: var(--jv-text);
+    font: 600 21px/1.1 var(--font-geist-sans), system-ui, sans-serif;
+    letter-spacing: -.035em;
+  }
+  .hp-start-sub { margin: 7px 0 0; color: var(--jv-muted); font-size: 12px; line-height: 1.45; }
+  .hp-start-list { display: grid; margin-top: 22px; border-top: 1px solid var(--jv-line); }
+  .hp-start-action {
+    display: grid; grid-template-columns: 24px minmax(0, 1fr) 12px; gap: 11px;
+    align-items: center; width: 100%; border: 0; border-bottom: 1px solid var(--jv-line);
+    background: none; padding: 15px 0; text-align: left; cursor: pointer; color: inherit;
+    transition: border-color .15s ease;
+  }
+  .hp-start-action:hover { border-bottom-color: var(--jv-line-strong); }
+  .hp-start-glyph { color: var(--jv-accent); font-size: 15px; line-height: 1; text-align: center; }
+  .hp-start-copy { display: grid; gap: 4px; min-width: 0; }
+  .hp-start-copy b {
+    color: var(--jv-text); font: 500 13px/1.25 var(--font-geist-sans), system-ui, sans-serif;
+  }
+  .hp-start-copy small { color: var(--jv-dim); font-size: 11px; line-height: 1.35; }
+  .hp-start-arrow { color: var(--jv-dim); font-size: 12px; transition: color .15s ease, transform .15s ease; }
+  .hp-start-action:hover .hp-start-arrow { color: var(--jv-accent); transform: translate(1px, -1px); }
+  .hp-start-kicker-2 { margin-top: 25px; }
+  .hp-start-links { display: flex; gap: 20px; margin-top: 13px; }
+  .hp-start-links button {
+    border: 0; background: none; padding: 0 0 5px; cursor: pointer;
+    border-bottom: 1px solid var(--jv-line); color: var(--jv-muted);
+    font: 500 11px/1 var(--font-geist-mono), ui-monospace, monospace; letter-spacing: .04em;
+    transition: color .15s ease, border-color .15s ease;
+  }
+  .hp-start-links button:hover { color: var(--jv-accent); border-bottom-color: var(--jv-accent); }
 
   .hp-urlblock { display: grid; gap: 7px; }
   .hp-url {

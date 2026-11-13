@@ -54,6 +54,9 @@ export default function HudPage() {
     obsidian: null,
   });
   const [clock, setClock] = useState(clockLabel);
+  const openTool = useCallback((tab: string) => {
+    window.dispatchEvent(new CustomEvent("jarvis:harness-tab", { detail: tab }));
+  }, []);
 
   useEffect(() => {
     paint(mode === "harness" ? HARNESS_BG : "transparent");
@@ -155,6 +158,24 @@ export default function HudPage() {
                 <span>SESSÃO 01</span>
               </div>
             </div>
+            <button
+              type="button"
+              className="rail-new"
+              onClick={() => window.dispatchEvent(new CustomEvent("jarvis:new-session"))}
+            >
+              <span aria-hidden="true">+</span> NOVA CONVERSA
+            </button>
+            <div className="rail-block">
+              <p className="rail-label">SESSÃO</p>
+              <ul className="rail-nav">
+                <li>
+                  <button type="button" className="is-on" onClick={() => openTool("inicio")}>
+                    <span>Conversa atual</span>
+                    <em>01</em>
+                  </button>
+                </li>
+              </ul>
+            </div>
             <div className="rail-block">
               <p className="rail-label">ATALHOS</p>
               <ul className="rail-keys">
@@ -200,6 +221,12 @@ export default function HudPage() {
           </aside>
 
           <section className="harness-thread" aria-label="Conversa">
+            <div className="harness-thread-head">
+              <div>
+                <p className="thread-kicker">CANAL DIRETO</p>
+                <h1 className="thread-title">Conversa</h1>
+              </div>
+            </div>
             <JarvisApp hud />
           </section>
 
@@ -273,11 +300,11 @@ const HARNESS_CSS = `
   /* corpo: rail / conversa / painel */
   .harness-body {
     flex: 1 1 auto; min-height: 0; display: grid;
-    grid-template-columns: 200px minmax(0, 1fr) auto;
-    column-gap: 40px; padding: 24px 28px 18px; overflow: hidden;
+    grid-template-columns: 228px minmax(0, 1fr) auto;
+    column-gap: 36px; padding: 24px 28px 18px; overflow: hidden;
   }
 
-  .harness-rail { min-width: 0; display: flex; flex-direction: column; gap: 26px; }
+  .harness-rail { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
   .rail-brand { display: flex; align-items: center; gap: 10px; }
   .rail-glyph {
     flex: 0 0 auto; width: 7px; height: 7px; transform: rotate(45deg);
@@ -291,6 +318,33 @@ const HARNESS_CSS = `
     display: block; margin-top: 4px;
     font: 500 10px/1 var(--font-geist-mono), ui-monospace, monospace;
     letter-spacing: .14em; color: var(--jv-accent, #ff8a1e);
+  }
+  .rail-new {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    border: 0; border-bottom: 1px solid var(--jv-line, rgba(255,255,255,.09));
+    background: none; padding: 0 0 11px; text-align: left; cursor: pointer;
+    color: var(--jv-text, #f2f2ee);
+    font: 600 10.5px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .1em; transition: color .16s ease, border-color .16s ease;
+    -webkit-app-region: no-drag;
+  }
+  .rail-new span { color: var(--jv-accent, #ff8a1e); font-size: 15px; line-height: .7; }
+  .rail-new:hover { color: var(--jv-accent-2, #ffb15a); border-bottom-color: var(--jv-line-strong, rgba(255,255,255,.18)); }
+  .rail-nav { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+  .rail-nav button {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%;
+    border: 0; background: none; padding: 6px 0; text-align: left; cursor: pointer;
+    color: var(--jv-muted, #9b9b95);
+    font: 400 12px/1.3 var(--font-geist-sans), system-ui, sans-serif;
+    transition: color .15s ease;
+    -webkit-app-region: no-drag;
+  }
+  .rail-nav button:hover { color: var(--jv-text, #f2f2ee); }
+  .rail-nav button.is-on { color: var(--jv-accent, #ff8a1e); }
+  .rail-nav button.is-on em { color: var(--jv-accent, #ff8a1e); }
+  .rail-nav em {
+    font: 500 9px/1 var(--font-geist-mono), ui-monospace, monospace;
+    font-style: normal; letter-spacing: .08em; color: var(--jv-dim, #8a8a83);
   }
   .rail-label {
     margin: 0 0 10px;
@@ -322,8 +376,22 @@ const HARNESS_CSS = `
     min-width: 0; min-height: 0; height: 100%;
     display: flex; flex-direction: column;
   }
+  .harness-thread-head {
+    flex: 0 0 auto; display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 18px; padding: 0 0 18px;
+  }
+  .thread-kicker {
+    margin: 0 0 7px; color: var(--jv-accent);
+    font: 600 9.5px/1 var(--font-geist-mono), ui-monospace, monospace;
+    letter-spacing: .2em; text-transform: uppercase;
+  }
+  .thread-title {
+    margin: 0; color: var(--jv-text);
+    font: 600 22px/1 var(--font-geist-sans), system-ui, sans-serif;
+    letter-spacing: -.04em;
+  }
   .harness-thread .shell {
-    height: 100%; max-width: none; margin: 0; padding: 0; min-height: 0;
+    flex: 1 1 auto; height: auto; max-width: none; margin: 0; padding: 0; min-height: 0;
   }
   .harness-thread .shell--empty .chat-empty {
     align-content: start; padding-top: 18px;
@@ -348,6 +416,7 @@ const HARNESS_CSS = `
     }
     .rail-block { display: flex; align-items: baseline; gap: 10px; }
     .rail-status { display: none; }
+    .rail-new, .rail-nav { display: none; }
     .rail-label { display: none; }
     .rail-keys { display: flex; gap: 16px; }
     .rail-keys li { display: flex; align-items: baseline; gap: 6px; }

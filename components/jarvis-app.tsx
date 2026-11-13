@@ -795,6 +795,7 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     stopResponse();
     setVoiceMode(false);
   });
+  const newSessionRef = useRef<() => void>(() => {});
   useEffect(() => {
     talkRef.current = toggleMic;
     hideRef.current = () => {
@@ -808,6 +809,12 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     const stopHide = window.jarvisHud.onHidden(() => hideRef.current());
     return () => { stopTalk(); stopHide(); };
   }, [hud]);
+
+  useEffect(() => {
+    const startNew = () => newSessionRef.current();
+    window.addEventListener("jarvis:new-session", startNew);
+    return () => window.removeEventListener("jarvis:new-session", startNew);
+  }, []);
 
   async function changeModel(next: string) {
     const previous = model;
@@ -1130,6 +1137,12 @@ export default function JarvisApp({ hud = false }: { hud?: boolean }) {
     : listening ? "Ouvindo"
     : remoteState !== "idle" ? "Navegador em atividade"
     : "Em repouso";
+
+  useEffect(() => {
+    newSessionRef.current = () => {
+      void newSession();
+    };
+  });
 
   return (
     <div

@@ -6,7 +6,7 @@ const HUD_URL = "http://127.0.0.1:3300/hud";
 const APP_URL = "http://127.0.0.1:3300/";
 const OPEN = { width: 380, height: 462 };
 const REST = { width: 330, height: 312 };
-const HARNESS = { width: 1180, height: 820 };
+const HARNESS = { width: 1480, height: 880 };
 
 let win = null;
 let tray = null;
