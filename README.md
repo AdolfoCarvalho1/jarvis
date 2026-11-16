@@ -180,3 +180,7 @@ serve.cmd / dev.cmd          atalhos
 - O HUD do Windows usa Electron. A opção **Atravessar cliques** precisa estar desligada para arrastar a janela.
 - O fallback Document Picture-in-Picture (Chrome/Edge) continua para quando o Electron não estiver instalado; ele tem a moldura do sistema e precisa de um clique real.
 - `controlar_pc` abre apenas apps da whitelist (chrome, edge, spotify, notepad, explorer, vscode, calc, whatsapp, telegram) ou URLs http(s).
+
+## Licença
+
+MIT — veja [LICENSE](LICENSE).
