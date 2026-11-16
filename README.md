@@ -46,6 +46,14 @@ Não há várias threads: existe **uma conversa principal** e ela nunca "reinici
 
 ## Configuração (`.env.local`)
 
+Copie o modelo e preencha com suas chaves:
+
+```bash
+cp .env.example .env.local
+```
+
+`.env.local` fica fora do Git. O repositório é público: nunca comite chaves, tokens ou o banco local (`/.data`).
+
 | variável | função |
 | --- | --- |
 | `OPENCODE_GO_API_KEY` | chave da OpenCode Go (obrigatória) |

@@ -24,11 +24,11 @@ version: 1
 ## Comandos
 
 ```bash
-cd "C:/Users/adolf/Desktop/jarvis"
+cd "."
 powershell -NoProfile -Command "Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force; Get-CimInstance Win32_Process | Where-Object { (\$_.Name -eq 'cmd.exe' -and \$_.CommandLine -like '*serve.cmd*') -or (\$_.Name -eq 'node.exe' -and \$_.CommandLine -like '*next*start*') } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"
 rm -rf .next
 npm run build
-wscript.exe "C:/Users/adolf/Desktop/jarvis/iniciar.vbs"
+wscript.exe ".\iniciar.vbs"
 ```
 
 Para abrir o HUD: `curl -X POST -H "Origin: http://127.0.0.1:3300" http://127.0.0.1:3300/api/hud`.
